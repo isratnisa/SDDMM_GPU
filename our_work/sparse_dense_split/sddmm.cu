@@ -18,7 +18,7 @@ int sp_tile_sizeX = 256;
 int dp_tile_sizeX = 90;
 int actv_row_size = 90;
 int tile_sizeY = 25000;
-int k=100;
+int k;
 int BLOCKSIZE=512;
 
 inline cudaError_t checkCuda(cudaError_t result, int s){
@@ -47,20 +47,10 @@ int *d_lastIdx, long sp_nnz){
     grid.x = (n_cols/sp_tile_sizeX+1);
     // grid.x = (32 * n_rows + BLOCKSIZE - 1) / BLOCKSIZE;
     checkCuda(cudaEventRecord(start), __LINE__);
-    // comp_kernel_CSR<<<grid, block, 0, 0>>>(d_row_ptr, d_col_ind, d_val_ind, d_W, d_H, d_p_ind, n_rows, k);
-    //     // cout << "tile "<<tile<<" nnz "<< nnz_tile << " grid "<<grid.x << endl;
-    sp_comp_kernel_COO<<<grid, block, 0, stream[0]>>>(d_sp_row_ind, d_sp_col_ind, d_sp_val_ind, d_W, d_H, 
-    sp_nnz, n_rows, n_cols, k, d_lastIdx);
+    for (int t_st = 0; t_st < k ; t_st +=32)
+        sp_comp_kernel_COO<<<grid, block, 0, stream[0]>>>(d_sp_row_ind, d_sp_col_ind, d_sp_val_ind, d_W, d_H, 
+    sp_nnz, n_rows, n_cols, k, d_lastIdx, t_st);
 
-
-    // for (int tile = 0; tile < n_tile; ++tile){
-    //     int nnz_tile = lastIdx_tile[tile+1]-lastIdx_tile[tile];
-    //     grid.x = (nnz_tile + BLOCKSIZE - 1) / BLOCKSIZE;
-    //     // cout << "tile "<<tile<<" nnz "<< nnz_tile << " grid "<<grid.x << endl;
-    //     comp_kernel_COO<<<grid,block, 0, stream[tile]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
-    //     nnz, n_cols, k, d_tiled_ind, lastIdx_tile[tile], lastIdx_tile[tile+1], tile);
-
-    // }
        
     checkCuda(cudaEventRecord(stop), __LINE__);
     cudaEventSynchronize(stop);
@@ -241,8 +231,8 @@ void init(int *rows, int *cols, float* vals){
     cudaMemcpy(d_W, &(W[0]),  n_rows * k *sizeof(float), cudaMemcpyHostToDevice);
     //cudaMemcpy(d_W, &(W_t[0]),  n_rows * k *sizeof(float), cudaMemcpyHostToDevice);
     
-    //cudaMemcpy(d_H, &(H[0]),  n_cols * k *sizeof(float), cudaMemcpyHostToDevice);  
-    cudaMemcpy(d_H, &(H_t[0]),  n_cols * k *sizeof(float), cudaMemcpyHostToDevice);  
+    cudaMemcpy(d_H, &(H[0]),  n_cols * k *sizeof(float), cudaMemcpyHostToDevice);  
+    //cudaMemcpy(d_H, &(H_t[0]),  n_cols * k *sizeof(float), cudaMemcpyHostToDevice);  
 
     sp_sddmm_GPU(d_sp_row_ind, d_sp_col_ind, d_sp_val, d_W, d_H, d_sp_lastIdx, sp_nnz );
 

@@ -1,6 +1,6 @@
 // //perfect shared_block cylcic vWARP
 __global__ void sp_comp_kernel_COO(int const* __restrict__ row_ind, int const* __restrict__ col_ind, float *val, const float * __restrict__ u, const float * __restrict__ v, 
-   int nnz, int n_rows, int n_cols, int k, int *tile_limIdx)
+   int nnz, int n_rows, int n_cols, int k, int *tile_limIdx, int t_st)
 {
     unsigned int tId = threadIdx.x;
     unsigned int laneId = tId & 1;
@@ -10,53 +10,43 @@ __global__ void sp_comp_kernel_COO(int const* __restrict__ row_ind, int const* _
     //if(tId == 0) printf("GPU tile lim %d %d %d \n", tile, tile_st, tile_end);
     __shared__ float sh[180*32];
     int sh_tile = 180;
+    int WARP_ID = tId >> 5;
+    int tid_in_WARP = tId & 31;
+    int step = blockDim.x >> 5;
     unsigned int c = (tId >> 1) + tile_st;
-    if(c < tile_end && c< nnz){
-        int col = col_ind[c];
-        //int tile  = col/sh_tile;
 
-        for (int t = 0; t < k; ++t){
-            for (int i = tId; i < 180 && (i +(tile*180)) < n_cols; i+=blockDim.x)
-                sh[t * 180 + i] = v[ (t * n_cols) + (tile * 180 + i)];
-        } 
-    }          
+    int t = tid_in_WARP;
+    for (int i = WARP_ID; i < sh_tile && (i +(tile*sh_tile)) < n_cols; i+=step)
+        sh[i *  32 + t] = v[(tile * sh_tile + i) *k + t_st + t];  
     
     __syncthreads();
  
     for ( ;(c) < tile_end && (c)< nnz; c += (blockDim.x >> 1)){
-        // int col = col_ind[c];
-        // int tile  = col/sh_tile;
-        // for (int t = 0; t < k; ++t){
-        //     for (int i = tId; i < sh_tile && (i +(tile*sh_tile)) < n_cols; i+=blockDim.x)
-        //         sh[t * sh_tile + i] = v[ (t * n_cols) + (tile * sh_tile + i)];
-
-        // }    
-        // __syncthreads();
-        float sm =0, g=0 ;
+   
+        float sm =0, g=0, g1=0, g2=0, sm1=0, sm2=0 ;
         int row = row_ind[c];
-        int cc = col_ind[c];
-        //for (int t = 0; t < k; ++t)
-        for (int t = laneId; t < k; t+=2)
-        { //int t= 5;
-            //sm += u[row*k+t] * v[col*k+t];
-            // sm += u[row*k+t] * sh[(col - tile*180) * k + t];
-            g += u[row*k+t] * sh[(t * sh_tile) + (cc - tile * sh_tile)];
-            //g += u[t*n_rows+row] * sh[(t * sh_tile) + (cc - tile * sh_tile)];
-          
-            //g += u[row*k+t] * v[t*n_cols+cc];
-            //if(c == 47380 || c == 47379 ) printf("GPU %d %d %d %d : %f %f \n", tile, c, c*4, t, u[row*k+t], v[t*n_cols+cc] );  
+        int col = col_ind[c];
+        // int row = row_ind[c] >> 8;
+        // int col = tile*sh_tile + (row_ind[c] & 0xff);
+        int sh_col = col - tile * sh_tile;
+
+        for (int t = laneId*16; t < (laneId+1)*16; t+=8)
+        //for (int t = 0; t < k; t+=8)
+        {
+            float4 rtmp1 = *((float4*) &sh[sh_col * 32 + t]); 
+            float4 ctmp1 = *((float4*) &u[row * k + t_st + t ]);
+            sm1+= rtmp1.x * ctmp1.x + rtmp1.y * ctmp1.y +  rtmp1.z * ctmp1.z +  rtmp1.w * ctmp1.w ; 
+            
+            float4 rtmp2 = *((float4*) &sh[sh_col * 32 + t+4]); 
+            float4 ctmp2 = *((float4*) &u[ row * k + t_st + t+4]);
+            sm2+= rtmp2.x * ctmp2.x + rtmp2.y * ctmp2.y +  rtmp2.z * ctmp2.z +  rtmp2.w * ctmp2.w ; 
         }
-        __syncthreads();
-        // g += __shfl_xor(g, 4);
-        // g += __shfl_xor(g, 2);
-        g += __shfl_xor(g, 1);
-
-        __syncthreads();
-            //sm += u[row*k+t] * sh[(t * sh_tile) + (cc - tile * sh_tile)];
-
-        val[c] = val[c] * g;      
-
-    }    
+        sm1 += __shfl_xor(sm1, 1);
+        sm2 += __shfl_xor(sm2, 1);
+        //val[c] = val[c] * (sm1 + sm2);
+        val[c] = val[c] * (sm1 + sm2);  
+    }
+    __syncthreads();
 }
 
 
@@ -76,97 +66,63 @@ __global__ void dp_comp_kernel_COO(int const* __restrict__ row_ind, int const* _
     int WARP_ID = tId >> 5;
     int tid_in_WARP = tId & 31;
     int step = blockDim.x >> 5;
-    int o_t = 0;
-    //for (int o_t = 0; o_t < k; o_t+=32)
-    {
 
-        int tile  = blockIdx.x;// col/tile_size;
-           int t = tid_in_WARP;
-            for (int i = WARP_ID; i < sh_tile && (i +(tile_no*sh_tile)) < n_cols; i+=step){
-                sh_c[i *  k + t] = v[(tile * sh_tile + i) *k + t];
-            }
-                  
+    int tile  = blockIdx.x;// col/tile_size;
+   int t = tid_in_WARP;
+    for (int i = WARP_ID; i < sh_tile && (i +(tile_no*sh_tile)) < n_cols; i+=step){
+        sh_c[i *  k + t] = v[(tile * sh_tile + i) *k + t];
+    }           
+    __syncthreads();
+
+    int g_n_blocks = no_block_tile[blockIdx.x]; int n_blocks=0;
+    if(blockIdx.x == 0) n_blocks =  no_block_tile[blockIdx.x];
+    else n_blocks =  no_block_tile[blockIdx.x] - no_block_tile[blockIdx.x-1];
+
+    int block_st = tile_st;// lastIdx_block_tile[g_n_blocks + block-1];
+    for (int block = 0; block < n_blocks ; block++){          
+        int block_end = lastIdx_block_tile[tile * max_active_block + block];
+
+        WARP_ID = tId >> 5;
+        tid_in_WARP = tId & 31;
+        step = blockDim.x >> 5;    
+        int t = tid_in_WARP;
+        for (int i = WARP_ID; i < sh_tile && i < n_rows; i+=step)
+                sh_r[i *  k + t] = u[(active_row[(tile*max_active_row) + (block * sh_tile_r + i)]) * k + t];
+         
         __syncthreads();
 
-        int g_n_blocks = no_block_tile[blockIdx.x]; int n_blocks=0;
-        if(blockIdx.x == 0) n_blocks =  no_block_tile[blockIdx.x];
-        else n_blocks =  no_block_tile[blockIdx.x] - no_block_tile[blockIdx.x-1];
-        //if(blockIdx.x == 1 && tId ==0 ) printf("GPU %d : %d %d %d %d\n",  tile, n_blocks, tile_st, tile_end );
+        for (int c = (tId >> 1) + block_st; c < block_end && c< nnz; c+=(blockDim.x >> 1) ){
+            float sm =0 ;           float sm1 =0, sm2=0, sm3=0, sm4=0;
+            int row = row_ind[c];
+            int col = col_ind[c];
+            // int row = row_ind[c] >> 8;
+            // int col = tile*sh_tile + (row_ind[c] & 0xff);
 
-        int block_st = tile_st;// lastIdx_block_tile[g_n_blocks + block-1];
-        for (int block = 0; block < n_blocks ; block++){          
-            int block_end = lastIdx_block_tile[tile * max_active_block + block];
+            int active_row_ = active_row[(tile*max_active_row) + row];
 
+            int passive_row = row;
+            int sh_row = row - block * sh_tile;
+            int sh_col = col - tile * sh_tile;
 
-            // for (int t = 0; t < k; ++t){
-            //     for (int i = tId; i < sh_tile_r && (i +(tile*sh_tile)) < n_rows; i+=blockDim.x){
-            //         sh_r[t * sh_tile + i] = u[ (t * n_rows) + (active_row[(tile*max_active_row) + (block * sh_tile_r + i)])];                   
-            //     }
-            // }
-            WARP_ID = tId >> 5;
-            tid_in_WARP = tId & 31;
-            step = blockDim.x >> 5;    
-            int t = tid_in_WARP;
-            for (int i = WARP_ID; i < sh_tile && i < n_rows; i+=step)
-                    sh_r[i *  k + t] = u[(active_row[(tile*max_active_row) + (block * sh_tile_r + i)]) * k + t];
-             
-            __syncthreads();
-            //int c = (tId >> 1) + block_st;
-            // if( tId <2 && tile_no ==0 && block < 50 && c < 1000)
-            //         printf("GPU %d %d - nnz block: %d:  %d  \n", block, c, block_end-block_st, sh_tile*block );
-            
-            // int c = tId + block_st;
-            // if(c < block_end && c< nnz)
-            for (int c = (tId >> 1) + block_st; c < block_end && c< nnz; c+=(blockDim.x >> 1) ){
-                float sm =0 ;           float sm1 =0, sm2=0, sm3=0, sm4=0;
-                int row = row_ind[c];
-                int col = col_ind[c];
-                // int row = row_ind[c] >> 8;
-                // int col = tile*sh_tile + (row_ind[c] & 0xff);
-
-                int active_row_ = active_row[(tile*max_active_row) + row];
-
-                int passive_row = row;
-                int sh_row = row - block * sh_tile;
-                int sh_col = col - tile * sh_tile;
-                if( tId < 8 && tile_no ==0 && block < 50 && c < 1000 && u[active_row_ * k +5] != sh_r[sh_row * k + 5] )
-                    printf("GPU %d %d:  %d %d %d - %f %f \n", block, c, row, sh_row, sh_tile*block,  u[active_row_ * k +5], sh_r[sh_row * k + 5] );
-                //for (int t = 0; t < k; t+=8)
-                for (int t = laneId*16; t < (laneId+1)*16; t+=8)
-                {
-                    //float4 rtmp1 = *((float4*) &u[active_row_ * k + t]);;;//&sh_r[sh_row * k + t]); 
-                    float4 rtmp1 = *((float4*) &sh_r[sh_row * k + t]); 
-                    float4 ctmp1 = *((float4*) &sh_c[ sh_col * k + t]);
-                    sm1+= rtmp1.x * ctmp1.x + rtmp1.y * ctmp1.y +  rtmp1.z * ctmp1.z +  rtmp1.w * ctmp1.w ; 
-                    
-                    float4 rtmp2 = *((float4*) &sh_r[sh_row * k + t+4]); 
-                    float4 ctmp2 = *((float4*) &sh_c[ sh_col * k + t+4]);
-                    sm2+= rtmp2.x * ctmp2.x + rtmp2.y * ctmp2.y +  rtmp2.z * ctmp2.z +  rtmp2.w * ctmp2.w ; 
-                }
-                sm1 += __shfl_xor(sm1, 1);
-                sm2 += __shfl_xor(sm2, 1);
-                val[c] = val[c] * (sm1 + sm2);
-
-                // for (int t = laneId; t < k; t+=2){
-                // //for (int t = 0; t < k; ++t){
-                //     //sm += u[row*k+t] * v[col*k+t];
-                //     // sm += u[t*n_rows+row] * v[t*n_cols+cc];
-                //     //sm += u[t*n_rows+active_row_] * sh_c[ t*sh_tile + sh_col]; ;//v[t*n_cols+col];
-                //    // sm += u[active_row_ * k +t] * sh_c[ sh_col * k + t]; 
-                //     //sm += sh_r[t * sh_tile + sh_row] * sh_c[ sh_col * k + t]; 
-                //     sm += sh_r[sh_row * k + t] * sh_c[ sh_col * k + t]; 
-                // }
-                // //__syncthreads();
-                // sm += __shfl_xor(sm, 1);
-                // // __syncthreads();
-                // val[c] = val[c] * sm; 
-                sm=0;
+            for (int t = laneId*16; t < (laneId+1)*16; t+=8){
+                float4 rtmp1 = *((float4*) &sh_r[sh_row * k + t]); 
+                float4 ctmp1 = *((float4*) &sh_c[ sh_col * k + t]);
+                sm1+= rtmp1.x * ctmp1.x + rtmp1.y * ctmp1.y +  rtmp1.z * ctmp1.z +  rtmp1.w * ctmp1.w ; 
                 
+                float4 rtmp2 = *((float4*) &sh_r[sh_row * k + t+4]); 
+                float4 ctmp2 = *((float4*) &sh_c[ sh_col * k + t+4]);
+                sm2+= rtmp2.x * ctmp2.x + rtmp2.y * ctmp2.y +  rtmp2.z * ctmp2.z +  rtmp2.w * ctmp2.w ; 
             }
-            block_st = block_end;   
-            __syncthreads();         
-        }  
-   }  
+            sm1 += __shfl_xor(sm1, 1);
+            sm2 += __shfl_xor(sm2, 1);
+            val[c] = val[c] * (sm1 + sm2);
+            sm=0;
+            
+        }
+        block_st = block_end;   
+        __syncthreads();         
+    }  
+    
 }
 
 //perfecto no vWARP

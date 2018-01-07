@@ -93,16 +93,7 @@ void make_CSR(int *rows, int *cols, float * vals, long nnz, long n_rows, int *ro
         }
         row_ptr[r+1]=idx;
         // tot += nnz_row[r];
-    }
-    // cout << "tot = nnz :: " << tot << " = " << nnz << endl; 
-    // for (int i = 0; i < n_rows; ++i)
-    // 	 cout << " row "<<get<0>(items[idx]) << " " <<  row_ptr[i];
-    // cout << endl;
-
-    // for (int i = 0; i < nnz; ++i)
-    // 	cout << " "<< get<0>(items[i]) << " " <<  get<1>(items[i]) <<" "<< get<2>(items[i]) << endl;
-
-    
+    }    
 }
 
 // void make_tile(smat_t &R, mat_int &tiled_bin, const int TS)
