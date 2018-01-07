@@ -105,7 +105,7 @@ void make_CSR(int *rows, int *cols, float * vals, long nnz, long n_rows, int *ro
 
 void rewrite_matrix_1D(int * row_ptr, int * row_ind, int *col_ind, float * val_ind, 
 	int *new_rows, int *new_cols, float * new_vals, long nnz, long n_rows, long n_cols,
-	int TS, int *tiled_ind, int * lastIdx_tile,  int block, long &new_nnz, int * row_holder){
+	int TS, int TS_Y, int *tiled_ind, int * lastIdx_tile,  int block, long &new_nnz, int * row_holder){
     int tot_act =0;
 	long new_idx = 0, idx =0;
 	int n_tile = n_cols/TS + 1, tile_no=0;
@@ -117,134 +117,54 @@ void rewrite_matrix_1D(int * row_ptr, int * row_ind, int *col_ind, float * val_i
     unsigned int final_int =0, final_row, final_col;
 
     // #pragma omp parallel for 
-    for(int tile_lim = TS; tile_lim <= (n_cols+TS-1); tile_lim+=TS){ 
-    	tile_no = tile_lim/TS;  
-        int active_row=0;
-        int r= 0;
-    	for(int holder = 0; holder <n_rows; ++holder){ 
-            r = row_holder[holder];
-    		if(tile_lim == TS){
-        		idx = row_ptr[holder]; row_lim[holder] = idx;}
-        	else 
-                idx = row_lim[holder];		
-       		while(col_ind[idx] < tile_lim && idx < row_ptr[holder+1]){
-                tiled_ind[new_idx] = idx;
-                new_rows[new_idx] = row_ind[idx];
-                new_cols[new_idx] = col_ind[idx];
+    for(int tile_row = 0; tile_row <= (n_rows+TS_Y-1); tile_row+=TS_Y){ 
+        int tile_no_r=tile_row/TS_Y ; //start from 0
+        for(int tile_col = TS; tile_col <= (n_cols+TS-1); tile_col+=TS){ 
+        	tile_no = tile_col/TS;  //start from 1
+            int active_row=0;
+            int r= 0;
+            int holder = tile_row;
+        	for(; holder<tile_row+TS_Y && holder <n_rows ; ++holder){ 
+                r = row_holder[holder];
+        		if(tile_col == TS){
+            		idx = row_ptr[holder]; row_lim[holder] = idx;}
+            	else 
+                    idx = row_lim[holder];		
+           		while(col_ind[idx] < tile_col && idx < row_ptr[holder+1]){
+                    tiled_ind[new_idx] = idx;
+                    new_rows[new_idx] = row_ind[idx];
+                    new_cols[new_idx] = col_ind[idx];
 
-                // ******* bit mask start *******
-                row = row_ind[idx];
-                col = col_ind[idx]%180;
-                c[0] = (col>>0) & 0xff;
-                c[1] = (row>>16) & 0xFF;
-                c[2] = (row>>8) & 0xFF;
-                c[3] = (row>>0) & 0xff;
-                final_int = ((c[1]) << 24) | ((c[2]) << 16) | c[3] << 8 | c[0];
-                new_rows[new_idx] = final_int;
-                // ******* bit mask finish ******
-                new_vals[new_idx] = val_ind[idx];
-                new_idx++;
-                idx++;
-            } 
-            if(idx != row_lim[holder])  
-                active_row++;       
-            row_lim[holder] = idx;
-            // if(tile_lim == TS)
-            //     cout << "rows " << holder <<" "<< row_lim[holder] << endl;            
+                    // ******* bit mask start *******
+                    row = row_ind[idx];
+                    col = col_ind[idx]%180;
+                    c[0] = (col>>0) & 0xff;
+                    c[1] = (row>>16) & 0xFF;
+                    c[2] = (row>>8) & 0xFF;
+                    c[3] = (row>>0) & 0xff;
+                    final_int = ((c[1]) << 24) | ((c[2]) << 16) | c[3] << 8 | c[0];
+                    new_rows[new_idx] = final_int;
+                    // ******* bit mask finish ******
+                    new_vals[new_idx] = val_ind[idx];
+                    new_idx++;
+                    idx++;
+                } 
+                if(idx != row_lim[holder])  
+                    active_row++;       
+                row_lim[holder] = idx;        
+            }
+            if(holder <= n_rows){
+                lastIdx_tile[tile_no_r * n_tile + tile_no] = new_idx; 
+                tot_act += active_row;
+            }
         }
-        lastIdx_tile[tile_no] = new_idx; 
-        cout << "tile here: "<<tile_no <<": actv row: "<<active_row<<" nnz: "<<lastIdx_tile[tile_no]  - lastIdx_tile[tile_no-1] << endl;
-        // if(tile_no >60)
-        tot_act += active_row;
-        // cout << tile_no << " act " << active_row <<" tot " << tot_act<< endl;
-
     }
-    // for (int i = lastIdx_tile[2]; i < lastIdx_tile[3]; ++i)
-    // {
-    //     if(new_cols[i]<180 )
-    //         cout << "lastIdx_tile " <<i<< " " <<row_ind[i]<< " "<<col_ind[i]<<" " <<new_cols[i] << endl;
-    // }
     cout <<"tot " << tot_act<<" " << tot_act/tile_no<< endl;
     new_nnz = nnz;
 
-    // for (int i = 0; i < nnz; ++i)
-    // 	cout << "old nnz " <<i<<": " <<row_ind[i] <<" "<<col_ind[i] <<" "<<val_ind[i]<< endl;
-
-    // for (int i = 0; i < nnz; ++i)
-    // 	cout << "new nnz " << i<<": " << new_rows[i] <<" "<<new_cols[i] <<" "<<new_vals[i] << endl;
-    // for (int i = 0; i <10; ++i)
-	   //    	cout  << i <<" : "<<row_ind[i] <<" " << col_ind[i] << " new: " << tiled_ind[i] 
-	   //    <<" , "<< new_rows[i] <<" "<< new_cols[i]<< endl;
      delete(row_lim);
 }
-// fixing last tile
-// long rewrite_matrix_1D(int * row_ptr, int * row_ind, int *col_ind, float * val_ind, 
-// 	int *new_rows, int *new_cols, float * new_vals, long nnz, long n_rows, long n_cols,
-// 	int TS, int *tiled_ind, int * lastIdx_tile, int blocksize, long &new_nnz){
 
-// 	long new_idx = 0, idx =0;
-// 	int n_tile = n_cols/TS + 1, tile_no=0;
-//     int *row_lim = new int[ n_rows];
-//     lastIdx_tile[0] = 0; 
-//     long tot =0 ;
-
-//     // #pragma omp parallel for 
-//     for(int tile_lim = TS; tile_lim <= (n_cols+TS-1); tile_lim+=TS){ 
-//     	tile_no = tile_lim/TS; 
-//         long tile_nnz = 0; 
-//     	for(int r = 0; r <n_rows; ++r){ 
-//     		if(tile_lim == TS){
-//         		idx = row_ptr[r]; row_lim[r] = idx;}
-//         	else {idx = row_lim[r];
-//         		// cout << " real " << r <<" "<<idx << endl;
-//         	} 
-
-//        		while(col_ind[idx] < tile_lim && idx < row_ptr[r+1]){
-//        			// cout << " inside " <<r<<" " << new_idx <<" "<< idx << endl;                        
-//                 tiled_ind[new_idx] = idx;
-//                 new_rows[new_idx] = row_ind[idx];
-//                 new_cols[new_idx] = col_ind[idx];
-//                 new_vals[new_idx] = val_ind[idx];
-//                 new_idx++;
-//                 idx++;
-//                 tile_nnz++;
-                
-//             }            
-//             row_lim[r] = idx;
-//         }  
-//         // tot += tile_nnz;
-//         // cout <<tile_nnz << " "<< tot << endl;
-
-//         //lastIdx_tile[tile_no] = new_idx; 
-//         int nnz_tile = new_idx - lastIdx_tile[tile_no-1];
-//         int remainder_block = blocksize - nnz_tile % blocksize;
-//         if(nnz_tile % blocksize == 0)
-//         	remainder_block = 0;
-
-//         while(remainder_block >0){
-//     	    tiled_ind[new_idx] = idx-1;
-//             new_rows[new_idx] = new_rows[new_idx-1];
-//             new_cols[new_idx] = new_cols[new_idx-1];
-//             new_vals[new_idx] = 0;
-//             // cout <<"fill up " <<new_idx <<" "<< idx <<" "<< row_ind[idx] << endl;
-//             new_idx++;
-//             remainder_block--;
-//         }
-//         lastIdx_tile[tile_no] = new_idx; 
-//     }
-//     cout << lastIdx_tile[0] << " "<<lastIdx_tile[1] << " "<<lastIdx_tile[2] << " " << endl;
-//     new_nnz = new_idx;
-
-//   //   for (int i = 0; i < nnz; ++i)
-// 		// cout << "before "<<i <<": "<< row_ind[i] <<" "<< col_ind[i] << " " << val_ind[i] << endl;
-//   //   for (int i = 0; i < new_nnz; ++i)
-//   //  		cout << "after "<<i <<": "<< new_rows[i] <<" "<< new_cols[i] << " " << new_vals[i] << endl;
-
-//   //   //for (int i = 16000; i <1650; ++i)
-// 	   //    	cout  << i <<" : " << lastIdx_tile[i+1]-lastIdx_tile[i] << endl;
-//     delete(row_lim);
-
-// }
 void make_2DBlocks(int * row_ptr, int * row_ind, int *col_ind, float * val_ind, long nnz, long n_rows, long n_cols){
     int *new_row_ind = new int[nnz];
     int *new_col_ind = new int[nnz];
@@ -295,16 +215,16 @@ void rewrite_matrix_2D(int * row_ptr, int * row_ind, int *col_ind, float * val_i
         cout << "orig " << i <<" : " <<row_ind[i] <<" "<<col_ind[i] << endl;    
 
     // #pragma omp parallel for 
-    for(int tile_lim = TS; tile_lim <= (n_cols+TS-1); tile_lim+=TS){ 
-         int tile_no_c =  tile_lim/TS;
-        for(int tile_lim_r = 0; tile_lim_r < n_rows+TS_r-1; tile_lim_r+=TS_r){  
-            tile_no = tile_no_c * n_tile_r + tile_lim_r/TS_r; 
-            for(int r = tile_lim_r; r <tile_lim_r+TS_r && r<n_rows ; ++r){ 
-                if(tile_lim == TS){
+    for(int tile_col = TS; tile_col <= (n_cols+TS-1); tile_col+=TS){ 
+         int tile_no_c =  tile_col/TS;
+        for(int tile_col_r = 0; tile_col_r < n_rows+TS_r-1; tile_col_r+=TS_r){  
+            tile_no = tile_no_c * n_tile_r + tile_col_r/TS_r; 
+            for(int r = tile_col_r; r <tile_col_r+TS_r && r<n_rows ; ++r){ 
+                if(tile_col == TS){
                     idx = row_ptr[r]; row_lim[r] = idx;}
                 else 
                     idx = row_lim[(tile_no-1) * n_rows +r];                     
-                while(col_ind[idx] < tile_lim && idx < row_ptr[r+1]){
+                while(col_ind[idx] < tile_col && idx < row_ptr[r+1]){
                     cout << " inside " <<r<<":" << new_idx <<" "<< idx << endl;                        
                     tiled_ind[new_idx] = idx;
                     // new_rows[new_idx] = row_ind[idx];

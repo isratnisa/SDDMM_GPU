@@ -15,7 +15,7 @@ using namespace std;
 
 long n_rows, n_cols, nnz;
 int tile_sizeX = 256; 
-int tile_sizeY = 25000;
+int tile_sizeY = 48000;
 int k=100;
 int BLOCKSIZE=512;
 inline cudaError_t checkCuda(cudaError_t result, int s){
@@ -30,6 +30,7 @@ inline cudaError_t checkCuda(cudaError_t result, int s){
 void sddmm_GPU(int * d_row_ptr, int * d_row_ind, int *d_col_ind, float * d_val_ind, float * d_W, float *d_H, 
 int *d_tiled_ind, int *d_lastIdx, long new_nnz){
     int n_tile = n_cols/tile_sizeX + 1;
+    int n_tile_r = n_rows/tile_sizeY + 1;
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
@@ -45,24 +46,15 @@ int *d_tiled_ind, int *d_lastIdx, long new_nnz){
     grid.x = (n_cols/tile_sizeX+1);
     // grid.x = (32 * n_rows + BLOCKSIZE - 1) / BLOCKSIZE;
     checkCuda(cudaEventRecord(start), __LINE__);
-  
-    // comp_kernel_CSR<<<grid, block, 0, 0>>>(d_row_ptr, d_col_ind, d_val_ind, d_W, d_H, d_p_ind, n_rows, k);
-    //     // cout << "tile "<<tile<<" nnz "<< nnz_tile << " grid "<<grid.x << endl;
+
     for (int t_st = 0; t_st < k ; t_st +=32){
-        comp_kernel_COO<<<grid, block, 0, stream[0]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
-        new_nnz, n_rows, n_cols, k, d_tiled_ind, d_lastIdx, t_st);
+        for (int r_t = 0; r_t < n_tile_r; ++r_t){
+            int r_st = r_t * tile_sizeY;
+            comp_kernel_COO<<<grid, block, 0, stream[0]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
+        new_nnz, n_rows, n_cols, k, d_tiled_ind, d_lastIdx+n_tile*r_t, t_st, r_st);
+        }
     }
 
-
-    // for (int tile = 0; tile < n_tile; ++tile){
-    //     int nnz_tile = lastIdx_tile[tile+1]-lastIdx_tile[tile];
-    //     grid.x = (nnz_tile + BLOCKSIZE - 1) / BLOCKSIZE;
-    //     // cout << "tile "<<tile<<" nnz "<< nnz_tile << " grid "<<grid.x << endl;
-    //     comp_kernel_COO<<<grid,block, 0, stream[tile]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
-    //     nnz, n_cols, k, d_tiled_ind, lastIdx_tile[tile], lastIdx_tile[tile+1], tile);
-
-    // }
-       
     checkCuda(cudaEventRecord(stop), __LINE__);
     cudaEventSynchronize(stop);
     //cudaDeviceSynchronize();
@@ -139,7 +131,7 @@ void init(int *rows, int *cols, float* vals){
     float *H_t = new float[n_cols*k];
     int n_tile_c = n_cols/tile_sizeX + 1;
     int n_tile_r = n_rows/tile_sizeY + 1;
-    int *lastIdx_tile = new int[n_tile_c+1];
+    int *lastIdx_tile = new int[n_tile_c*n_tile_r+1];
     int *row_holder = new int[n_rows];
     float *d_val, *d_W, *d_H, *d_W_t;
     int *d_row_ptr, *d_col_ind, *d_row_ind, *d_tiled_ind, *d_lastIdx;
@@ -167,7 +159,7 @@ void init(int *rows, int *cols, float* vals){
     //comp_bin(n_bin, count, n_rows, row_ptr, nnz);
 
     rewrite_matrix_1D(row_ptr, rows, cols, vals, new_rows, new_cols, new_vals, nnz, n_rows, n_cols, 
-        tile_sizeX, tiled_ind, lastIdx_tile, BLOCKSIZE, new_nnz, row_holder);
+        tile_sizeX, tile_sizeY, tiled_ind, lastIdx_tile, BLOCKSIZE, new_nnz, row_holder);
 
     // rewrite_col_sorted_matrix(row_ptr, rows, cols, vals, new_rows, new_cols, new_vals, nnz, n_rows, n_cols, 
     //     tile_sizeX, tiled_ind, lastIdx_tile, BLOCKSIZE, new_nnz);
@@ -182,13 +174,13 @@ void init(int *rows, int *cols, float* vals){
     checkCuda(cudaMalloc((void**)&d_row_ind, new_nnz*sizeof(int)),4);  
     //checkCuda(cudaMalloc((void**)&d_col_ind, new_nnz*sizeof(int)),4);
     checkCuda(cudaMalloc((void**)&d_val, new_nnz*sizeof(float)),4);
-    checkCuda(cudaMalloc((void**)&d_lastIdx, (n_tile_c+1)*sizeof(float)),4);
+    checkCuda(cudaMalloc((void**)&d_lastIdx, (n_tile_c*n_tile_r+1)*sizeof(float)),4);
     // checkCuda(cudaMalloc((void**)&d_tiled_ind, nnz*sizeof(int)),4);
     // checkCuda(cudaMemcpy(d_row_ptr,  &(row_ptr[0]), (n_rows+1)*sizeof(int), cudaMemcpyHostToDevice),4);
     checkCuda(cudaMemcpy(d_row_ind,  &(new_rows[0]), new_nnz*sizeof(int), cudaMemcpyHostToDevice),4);
     //checkCuda(cudaMemcpy(d_col_ind, &(new_cols[0]), new_nnz*sizeof(int), cudaMemcpyHostToDevice),4);;
     checkCuda(cudaMemcpy(d_val, &(new_vals[0]), new_nnz*sizeof(float), cudaMemcpyHostToDevice),4);;    
-    checkCuda(cudaMemcpy(d_lastIdx, &(lastIdx_tile[0]), (n_tile_c+1)*sizeof(float), cudaMemcpyHostToDevice),4);;    
+    checkCuda(cudaMemcpy(d_lastIdx, &(lastIdx_tile[0]), (n_tile_c*n_tile_r+1)*sizeof(float), cudaMemcpyHostToDevice),4);;    
 
     cudaMemset(d_val, 0, nnz*sizeof(float));
     // checkCuda(cudaMemcpy(d_tiled_ind, &(tiled_ind[0]), nnz*sizeof(int), cudaMemcpyHostToDevice),4);;    

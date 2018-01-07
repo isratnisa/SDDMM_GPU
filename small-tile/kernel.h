@@ -1,6 +1,6 @@
 // //perfect shared_block cylcic vWARP
 __global__ void comp_kernel_COO(int const* __restrict__ row_ind, int const* __restrict__ col_ind, float *val, const float * __restrict__ u, const float * __restrict__ v, 
-   int nnz, int n_rows, int n_cols, int k, int *tiled_ind, int *tile_limIdx, int t_st)
+   int nnz, int n_rows, int n_cols, int k, int *tiled_ind, int *tile_limIdx, int t_st, int r_st)
 {
     unsigned int tId = threadIdx.x;
     unsigned int laneId = tId & 1;
@@ -20,11 +20,8 @@ __global__ void comp_kernel_COO(int const* __restrict__ row_ind, int const* __re
 
     int t = tid_in_WARP;
     for (int i = WARP_ID; i < sh_tile && (i +(tile*sh_tile)) < n_cols; i+=step)
-        sh[i *  32 + t] = v[(tile * sh_tile + i) *k + t_st + t];  
-
-    // int t = WARP_ID;
-    // for (int r = tid_in_WARP; r < sh_tile && (r +(tile*sh_tile)) < n_cols; r+=32)
-    //     sh[t  * sh_tile + r] = v[ ((t+t_sh) * n_cols) + tile_offset + r];                   
+        sh[i *  32 + t] = v[(tile * sh_tile + i) * k + t_st + t];  
+                 
     __syncthreads();
  
     for ( ;(c) < tile_end && (c)< nnz; c += (blockDim.x >> 1)){
@@ -35,23 +32,6 @@ __global__ void comp_kernel_COO(int const* __restrict__ row_ind, int const* __re
         int col = tile*sh_tile + (row_ind[c] & 0xff);
         int sh_col = col - tile * sh_tile;
        
-        //for (int t = 0; t < 32; ++t){
-        // for (int t = laneId; t < 32; t+=2){ 
-        //     //sm += u[row*k+t] * v[col*k+t];
-        //     // sm += u[row*k+t] * sh[(col - tile*180) * k + t];
-        //     //g += u[row*k+ (t+t_sh)] *  sh[(t * sh_tile) + sh_col];
-        //     //g += u[row*k+ (t)] * sh[sh_col * k + t];
-        //     g = 1 * v[col];// * k + t];
-        //     //g +=  u[row*k+(t)] *v[(t+t_sh)*n_cols+cc];
-        // }
-        // //__syncthreads();
-        // // g += __shfl_xor(g, 4);
-        // // g += __shfl_xor(g, 2);
-        // // g += __shfl_xor(g, 1);
-        // //__syncthreads();
-        // val[c] =  (g) ;//* val[c];     
-
-
         for (int t = laneId*16; t < (laneId+1)*16; t+=8)
         //for (int t = 0; t < k; t+=8)
         {
