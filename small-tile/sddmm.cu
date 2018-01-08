@@ -234,7 +234,7 @@ int main(int argc, char* argv[]){
     k = atoi(argv[2]);
     tile_sizeX = atoi(argv[3]);   
     string str;  
-    fp >> str;
+    getline(fp,str);
     while(!isdigit(str[0])){
         getline(fp,str);
     }
