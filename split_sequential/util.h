@@ -6,6 +6,7 @@
 #include <bits/stdc++.h>  
 #include <time.h>
 #include <sys/time.h>
+int dense_th = 10000;
 using namespace std;
 inline double seconds(){
     struct timeval tp;
@@ -62,21 +63,8 @@ void unsorted_make_CSR(int *rows, int *cols, float * vals, long nnz, long n_rows
     of << n_cols <<" " << n_rows <<" " <<nnz << endl;
     for (long idx = 0; idx < nnz; ++idx) 
     	of << rows[idx] <<" " << cols[idx] <<" "<< vals[idx] << endl;
-    of.close();
-    // cout << "tot = nnz :: " << tot << " = " << nnz << endl; 
-    // for (int i = 0; i < n_rows; ++i)
-    // 	 cout << " row "<<get<0>(items[idx]) << " " <<  row_ptr[i];
-    // cout << endl;
-
-    // for (int i = 0; i < nnz; ++i)
-    // 	cout << " "<< get<0>(items[i]) << " " <<  get<1>(items[i]) <<" "<< get<2>(items[i]) << endl;
-
-    
+    of.close();    
 }
-
-// void make_tile(smat_t &R, mat_int &tiled_bin, const int TS)
-
-
 
 void make_CSR(int *rows, int *cols, float * vals, long nnz, long n_rows, int *row_ptr, int* row_holder){
 	//assuming sorted
@@ -106,11 +94,17 @@ void make_CSR(int *rows, int *cols, float * vals, long nnz, long n_rows, int *ro
 void rewrite_matrix_1D(int * row_ptr, int * row_ind, int *col_ind, float * val_ind, 
 	int *new_rows, int *new_cols, float * new_vals, long nnz, long n_rows, long n_cols,
 	int TS, int TS_Y, int *tiled_ind, int * lastIdx_tile,  int block, long &new_nnz, int * row_holder){
-    int tot_act =0, dense_th = 100000, d_row_counter=0;
+        
+    
+    int tot_act =0, d_row_counter=0;
 	long new_idx = 0, idx =0;
 	int n_tile = n_cols/TS + 1, tile_no=0;
     long *row_lim = new long[(n_tile+1) * n_rows];
     int *dense_row = new int[n_rows];
+    int *active_col = new int[n_cols];
+    for (int c = 0; c < n_cols; ++c)
+        active_col[c] = 0;
+
     lastIdx_tile[0] = 0; 
     unsigned char c[4];
     int row =0;
@@ -129,7 +123,7 @@ void rewrite_matrix_1D(int * row_ptr, int * row_ind, int *col_ind, float * val_i
                 r = row_holder[holder];
 
         		if(tile_col == TS){
-                    if(row_ptr[holder+1]-row_ptr[holder]>dense_th) {
+                    if(row_ptr[holder+1]-row_ptr[holder]<dense_th) {
                         dense_row[holder]=d_row_counter;
                         d_row_counter++;
                     }
@@ -137,7 +131,8 @@ void rewrite_matrix_1D(int * row_ptr, int * row_ind, int *col_ind, float * val_i
                 }
             	else 
                     idx = row_lim[holder];		
-           		while(col_ind[idx] < tile_col && idx < row_ptr[holder+1] && row_ptr[holder+1]-row_ptr[holder]>dense_th){
+           		while(col_ind[idx] < tile_col && idx < row_ptr[holder+1] && row_ptr[holder+1]-row_ptr[holder]<dense_th){
+                    active_col[col_ind[idx]] = 1;
                     tiled_ind[new_idx] = idx;
                     new_rows[new_idx] = dense_row[holder];// row_ind[idx];
                     new_cols[new_idx] = col_ind[idx];
@@ -166,10 +161,52 @@ void rewrite_matrix_1D(int * row_ptr, int * row_ind, int *col_ind, float * val_i
             }
         }
     }
-    cout  <<"new nnz " << new_idx<<" " << d_row_counter<< endl;
+    long counter = 0;
+    for (int c = 0; c < n_cols; ++c)
+        if(active_col[c] == 1)
+            counter++;
+    cout  <<"th " << dense_th<<" new nnz " << new_idx<<" active col " << counter << " dense_row: "<< d_row_counter << endl;
     new_nnz = nnz;
 
-     delete(row_lim);
+    delete(row_lim);
+}
+
+
+
+void write_mat(int * row_ptr, int * row_ind, int *col_ind, float * val_ind, 
+    int *new_rows, int *new_cols, float * new_vals, long nnz, long n_rows, long n_cols,
+    int TS, int TS_Y, int *tiled_ind, int * lastIdx_tile,  int block, long &new_nnz, int * row_holder){
+    
+    ofstream myfile;
+    myfile.open ("sparse_ny.txt");
+    myfile << "%%MatrixMarket matrix coordinate real general\n";
+    
+    int tot_act =0, d_row_counter=0;
+    long new_idx = 0, idx =0;
+
+    int *dense_row = new int[n_rows];
+    int *active_col = new int[n_cols];
+    for (int c = 0; c < n_cols; ++c)
+        active_col[c] = 0;
+
+    lastIdx_tile[0] = 0; 
+    unsigned int final_int =0, final_row, final_col;
+
+    for(int holder = 0; holder <n_rows ; ++holder){ 
+        if(row_ptr[holder+1]-row_ptr[holder]<dense_th)   {  
+            while(idx < row_ptr[holder+1] ){
+                myfile <<  row_ind[idx]+1 <<" "<< col_ind[idx]+1
+                <<" " <<  val_ind[idx] << endl;
+                new_idx++;
+                idx++;
+            }
+        } 
+        else{
+             while(idx < row_ptr[holder+1] )
+                idx++;
+        }  
+    }
+    myfile.close();
 }
 
 void make_2DBlocks(int * row_ptr, int * row_ind, int *col_ind, float * val_ind, long nnz, long n_rows, long n_cols){

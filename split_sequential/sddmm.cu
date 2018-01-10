@@ -160,7 +160,8 @@ void init(int *rows, int *cols, float* vals){
 
     rewrite_matrix_1D(row_ptr, rows, cols, vals, new_rows, new_cols, new_vals, nnz, n_rows, n_cols, 
         tile_sizeX, tile_sizeY, tiled_ind, lastIdx_tile, BLOCKSIZE, new_nnz, row_holder);
-
+    // write_mat(row_ptr, rows, cols, vals, new_rows, new_cols, new_vals, nnz, n_rows, n_cols, 
+    //     tile_sizeX, tile_sizeY, tiled_ind, lastIdx_tile, BLOCKSIZE, new_nnz, row_holder);
     // rewrite_col_sorted_matrix(row_ptr, rows, cols, vals, new_rows, new_cols, new_vals, nnz, n_rows, n_cols, 
     //     tile_sizeX, tiled_ind, lastIdx_tile, BLOCKSIZE, new_nnz);
     double t0 = seconds();
