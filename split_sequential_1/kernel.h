@@ -45,8 +45,9 @@ __global__ void comp_kernel_COO(int const* __restrict__ row_ind, int const* __re
             step = blockDim.x >> 5;    
             int t = tid_in_WARP;
             for (int i = WARP_ID; i < sh_tile && i < n_rows; i+=step){
-                //if(tile_no > 1005) printf("I am in \n");
+                //if active
                 //sh_r[i *  k + t] = u[(active_row[(tile*max_active_row) + (block * sh_tile_r + i)]) * k + t];
+                //if not active
                 sh_r[i *  k + t] = u[ (block * sh_tile_r + i) * k + t];
 
             }  

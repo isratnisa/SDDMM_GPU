@@ -119,12 +119,14 @@ int rewrite_matrix_1D(int * row_ptr, int * row_ind, int *col_ind, float * val_in
                         
             while(col_ind[idx] < tile_lim && idx < row_ptr[r+1] && row_ptr[r+1]-row_ptr[r]>dense_th){
                 tiled_ind[new_idx] = idx;
-                //new_rows[new_idx] = row_ind[idx];
-                new_rows[new_idx] = count[tile_no-1];
+                new_rows[new_idx] = row_ind[idx];
+                //new_rows[new_idx] = count[tile_no-1];
                 new_cols[new_idx] = col_ind[idx];
 
                 // ******* bit mask start *******
+                //if active
                 //row = count[tile_no-1];//row_ind[idx];
+                //if not active
                 row = row_ind[idx];
                 col = col_ind[idx]%96;
                 c[0] = (col>>0) & 0xff;
@@ -140,10 +142,13 @@ int rewrite_matrix_1D(int * row_ptr, int * row_ind, int *col_ind, float * val_in
                 idx++;
             }   
             if(idx != row_lim[r]){
-                active_row[(tile_no-1) * n_rows + count[tile_no-1]++]=r;  
-                            
+               active_row[(tile_no-1) * n_rows + count[tile_no-1]++]=r;  
+               //if active
+               //cur_block++;              
             }  
-            cur_block++;    
+            //if not active
+            cur_block++;  
+
            
             row_lim[r] = idx;
  
