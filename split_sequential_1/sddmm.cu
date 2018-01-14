@@ -177,13 +177,17 @@ void init(int *rows, int *cols, float* vals){
         tile_sizeX, tiled_ind, lastIdx_tile, active_row, lastIdx_block_tile, count_actv_row, actv_row_size, new_nnz, 
         no_block_tile);
 
+
+  // write_mat(row_ptr, rows, cols, vals, new_rows, new_cols, new_vals, nnz, n_rows, n_cols, 
+  //       tile_sizeX, tile_sizeY, tiled_ind, lastIdx_tile, BLOCKSIZE, new_nnz);
+
+
+
     // rewrite_col_sorted_matrix(row_ptr, rows, cols, vals, new_rows, new_cols, new_vals, nnz, n_rows, n_cols, 
     //     tile_sizeX, tiled_ind, lastIdx_tile, BLOCKSIZE, new_nnz);
     double t0 = seconds();
     // sddmm_CPU_CSR(row_ptr, cols, vals, W, H, p_ind);
     sddmm_CPU_COO(rows, cols, vals, W, H, p_ind);
-
-
 
    //***********Starting GPU****************
     checkCuda(cudaMalloc((void**)&d_W, k*n_rows*sizeof(float)),0); 

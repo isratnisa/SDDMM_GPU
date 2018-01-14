@@ -6,6 +6,7 @@
 #include <time.h>
 #include <sys/time.h>
 using namespace std;
+int dense_th = 10000;
 inline double seconds(){
     struct timeval tp;
     gettimeofday(&tp, NULL);
@@ -61,16 +62,7 @@ void unsorted_make_CSR(int *rows, int *cols, float * vals, long nnz, long n_rows
     of << n_cols <<" " << n_rows <<" " <<nnz << endl;
     for (long idx = 0; idx < nnz; ++idx) 
         of << rows[idx] <<" " << cols[idx] <<" "<< vals[idx] << endl;
-    of.close();
-    // cout << "tot = nnz :: " << tot << " = " << nnz << endl; 
-    // for (int i = 0; i < n_rows; ++i)
-    //   cout << " row "<<get<0>(items[idx]) << " " <<  row_ptr[i];
-    // cout << endl;
-
-    // for (int i = 0; i < nnz; ++i)
-    //  cout << " "<< get<0>(items[i]) << " " <<  get<1>(items[i]) <<" "<< get<2>(items[i]) << endl;
-
-    
+    of.close();    
 }
 // void make_tile(smat_t &R, mat_int &tiled_bin, const int TS)
 
@@ -89,19 +81,132 @@ void make_CSR(int *rows, int *cols, float * vals, long nnz, long n_rows, int *ro
         }
         row_ptr[r+1]=idx;
         // tot += nnz_row[r];
-    }
-    // cout << "tot = nnz :: " << tot << " = " << nnz << endl; 
-    // for (int i = 0; i < n_rows; ++i)
-    //   cout << " row "<<get<0>(items[idx]) << " " <<  row_ptr[i];
-    // cout << endl;
-
-    // for (int i = 0; i < nnz; ++i)
-    //  cout << " "<< get<0>(items[i]) << " " <<  get<1>(items[i]) <<" "<< get<2>(items[i]) << endl;
-
-    
+    } 
 }
 
-// void make_tile(smat_t &R, mat_int &tiled_bin, const int TS)
+
+int rewrite_matrix_1D(int * row_ptr, int * row_ind, int *col_ind, float * val_ind, 
+    int *new_rows, int *new_cols, float * new_vals, long nnz, long n_rows, long n_cols,
+    int TS, int *tiled_ind, int * lastIdx_tile, int *active_row, int *lastIdx_block_tile, int *count,  
+    int &actv_row_size, long &new_nnz, int *no_block_tile){
+
+    long new_idx = 0, idx =0;
+    int max_block_inAtile = n_rows/actv_row_size+1;
+    int n_tile = n_cols/TS + 1, tile_no=0;
+    int *row_lim = new int[ n_rows];
+    lastIdx_tile[0] = 0; 
+    int max_active_row = 0;
+    int sh_tile_r=96;
+    int last_idx =0 ;
+    int g_block_count = 0, min = 999999999;
+    unsigned char c[4];
+    int row =0;
+    int col =0;
+    unsigned int final_int =0, final_row, final_col;
+    // #pragma omp parallel for 
+    for(int tile_lim = TS; tile_lim <= (n_cols+TS-1); tile_lim+=TS){ 
+        int block_count =0 ;
+        int cur_block =0 ;
+        tile_no = tile_lim/TS;  
+        count[tile_no-1] = 0;
+       // cout << " tile " <<tile_no<< endl;
+
+        for(int r = 0; r <n_rows ; ++r){ 
+            if(tile_lim == TS){
+                idx = row_ptr[r]; row_lim[r] = idx;}
+            else 
+                idx = row_lim[r];
+                        
+            while(col_ind[idx] < tile_lim && idx < row_ptr[r+1] && row_ptr[r+1]-row_ptr[r]>dense_th){
+                tiled_ind[new_idx] = idx;
+                //new_rows[new_idx] = row_ind[idx];
+                new_rows[new_idx] = count[tile_no-1];
+                new_cols[new_idx] = col_ind[idx];
+
+                // ******* bit mask start *******
+                //row = count[tile_no-1];//row_ind[idx];
+                row = row_ind[idx];
+                col = col_ind[idx]%96;
+                c[0] = (col>>0) & 0xff;
+                c[1] = (row>>16) & 0xFF;
+                c[2] = (row>>8) & 0xFF;
+                c[3] = (row>>0) & 0xff;
+                final_int = ((c[1]) << 24) | ((c[2]) << 16) | c[3] << 8 | c[0];
+                new_rows[new_idx] = final_int;
+                // ******* bit mask finish ******
+
+                new_vals[new_idx] = val_ind[idx];
+                new_idx++;
+                idx++;
+            }   
+            if(idx != row_lim[r]){
+                active_row[(tile_no-1) * n_rows + count[tile_no-1]++]=r;  
+                            
+            }  
+            cur_block++;    
+           
+            row_lim[r] = idx;
+ 
+            if(cur_block >= sh_tile_r) { 
+                cur_block = 0;
+                lastIdx_block_tile[(tile_no-1)* max_block_inAtile + block_count] = new_idx; 
+                block_count++;  
+            }   
+            if(r == n_rows-1 && cur_block > 0 && cur_block < sh_tile_r){
+                lastIdx_block_tile[(tile_no-1)* max_block_inAtile + block_count] = new_idx;
+                block_count++;
+            } 
+        }
+        g_block_count += block_count ;//- 1;
+        no_block_tile[tile_no-1] = g_block_count;
+        if(count[tile_no-1] > max_active_row) max_active_row = count[tile_no-1];
+        if(count[tile_no-1] < min) min = count[tile_no-1];
+        lastIdx_tile[tile_no] = new_idx; 
+        //cout << tile_no <<" " << n_rows-count[tile_no-1] << endl;
+        
+    }
+    cout << "min-max act row " << min << " - "<< max_active_row<< endl;
+    new_nnz = nnz;
+    delete(row_lim);
+    return max_active_row;
+}
+
+void write_mat(int * row_ptr, int * row_ind, int *col_ind, float * val_ind, 
+    int *new_rows, int *new_cols, float * new_vals, long nnz, long n_rows, long n_cols,
+    int TS, int TS_Y, int *tiled_ind, int * lastIdx_tile,  int block, long &new_nnz){
+    
+    ofstream myfile;
+    myfile.open ("dense_ny1.txt");
+    myfile << "%%MatrixMarket matrix coordinate real general\n";
+    
+    int tot_act =0, d_row_counter=0;
+    long new_idx = 0, idx =0;
+
+    int *dense_row = new int[n_rows];
+    int *active_col = new int[n_cols];
+    for (int c = 0; c < n_cols; ++c)
+        active_col[c] = 0;
+
+    lastIdx_tile[0] = 0; 
+    unsigned int final_int =0, final_row, final_col;
+    long d_row =0;
+    for(int holder = 0; holder <n_rows ; ++holder){ 
+        if(row_ptr[holder+1]-row_ptr[holder]>dense_th)   { 
+            d_row++;
+            while(idx < row_ptr[holder+1] ){
+                myfile <<  d_row <<" "<< col_ind[idx]+1
+                <<" " <<  val_ind[idx] << endl;
+                new_idx++;
+                idx++;
+            }
+        } 
+        else{
+             while(idx < row_ptr[holder+1] )
+                idx++;
+        }  
+    }
+    myfile.close();
+}
 
 
 void make_2DBlocks(int * row_ptr, int * row_ind, int *col_ind, float * val_ind, long nnz, long n_rows, long n_cols){
@@ -210,100 +315,6 @@ void rewrite_col_sorted_matrix(int * row_ptr, int * row_ind, int *col_ind, float
         cout << "lastIdx_tile " << tile_no << " " <<lastIdx_tile[tile_no] << endl;
     }
     new_nnz = nnz;
-}
-
-int rewrite_matrix_1D(int * row_ptr, int * row_ind, int *col_ind, float * val_ind, 
-    int *new_rows, int *new_cols, float * new_vals, long nnz, long n_rows, long n_cols,
-    int TS, int *tiled_ind, int * lastIdx_tile, int *active_row, int *lastIdx_block_tile, int *count,  
-    int &actv_row_size, long &new_nnz, int *no_block_tile){
-
-    long new_idx = 0, idx =0;
-    int max_block_inAtile = n_rows/actv_row_size+1;
-    int n_tile = n_cols/TS + 1, tile_no=0;
-    int *row_lim = new int[ n_rows];
-    lastIdx_tile[0] = 0; 
-    int max_active_row = 0;
-    int sh_tile_r=96;
-    int last_idx =0 ;
-    int g_block_count = 0, min = 999999999;
-    unsigned char c[4];
-    int row =0;
-    int col =0;
-    unsigned int final_int =0, final_row, final_col;
-    // #pragma omp parallel for 
-    for(int tile_lim = TS; tile_lim <= (n_cols+TS-1); tile_lim+=TS){ 
-        int block_count =0 ;
-        int cur_block =0 ;
-        tile_no = tile_lim/TS;  
-        count[tile_no-1] = 0;
-       // cout << " tile " <<tile_no<< endl;
-
-        for(int r = 0; r <n_rows; ++r){ 
-            if(tile_lim == TS){
-                idx = row_ptr[r]; row_lim[r] = idx;}
-            else 
-                idx = row_lim[r];
-                        
-            while(col_ind[idx] < tile_lim && idx < row_ptr[r+1]){
-                tiled_ind[new_idx] = idx;
-                //new_rows[new_idx] = row_ind[idx];
-                new_rows[new_idx] = count[tile_no-1];
-                new_cols[new_idx] = col_ind[idx];
-
-                // ******* bit mask start *******
-                row = count[tile_no-1];//row_ind[idx];
-                col = col_ind[idx]%96;
-                c[0] = (col>>0) & 0xff;
-                c[1] = (row>>16) & 0xFF;
-                c[2] = (row>>8) & 0xFF;
-                c[3] = (row>>0) & 0xff;
-                final_int = ((c[1]) << 24) | ((c[2]) << 16) | c[3] << 8 | c[0];
-                new_rows[new_idx] = final_int;
-                // ******* bit mask finish ******
-
-                new_vals[new_idx] = val_ind[idx];
-                new_idx++;
-                idx++;
-            }   
-            if(idx != row_lim[r]){
-                //cout << "inside for row " << r << endl;  
-                active_row[(tile_no-1) * n_rows + count[tile_no-1]++]=r;  
-                cur_block++;   
-            }  
-            row_lim[r] = idx;
-            // if(new_idx - last_idx >= 1024) { 
-            //     last_idx = new_idx;
-            //     lastIdx_block_tile[(tile_no-1)* max_block_inAtile + block_count] = new_idx; 
-            //     block_count++;  
-            // }  
-            if(cur_block >= sh_tile_r) { 
-                cur_block = 0;
-                lastIdx_block_tile[(tile_no-1)* max_block_inAtile + block_count] = new_idx; 
-                block_count++;  
-
-            }   
-
-            if(r == n_rows-1 && cur_block > 0 && cur_block < sh_tile_r){
-                lastIdx_block_tile[(tile_no-1)* max_block_inAtile + block_count] = new_idx;
-                block_count++;
-            } 
-        }
-        if(tile_no < 5)
-            cout << "tile_no " << tile_no << " "<< lastIdx_tile[tile_no-1] <<" "
-            <<lastIdx_block_tile[(tile_no-1)* max_block_inAtile + block_count]<< endl;
-        g_block_count += block_count ;//- 1;
-        no_block_tile[tile_no-1] = g_block_count;
-        if(count[tile_no-1] > max_active_row)
-            max_active_row = count[tile_no-1];
-        if(count[tile_no-1] < min)
-            min = count[tile_no-1];
-        lastIdx_tile[tile_no] = new_idx; 
-        
-    }
-    cout << "min act row " << min << "max "<< max_active_row<< endl;
-    new_nnz = nnz;
-    delete(row_lim);
-    return max_active_row;
 }
 
 
