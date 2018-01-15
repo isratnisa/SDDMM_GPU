@@ -88,7 +88,7 @@ void make_CSR(int *rows, int *cols, float * vals, long nnz, long n_rows, int *ro
 int rewrite_matrix_1D(int * row_ptr, int * row_ind, int *col_ind, float * val_ind, 
     int *new_rows, int *new_cols, float * new_vals, long nnz, long n_rows, long n_cols,
     int TS, int *tiled_ind, int * lastIdx_tile, int *active_row, int *lastIdx_block_tile, int *count,  
-    int &actv_row_size, long &new_nnz, int *no_block_tile){
+    int &actv_row_size, long &new_nnz, int *no_block_tile, int sh_tile_r){
 
     long new_idx = 0, idx =0;
     int max_block_inAtile = n_rows/actv_row_size+1;
@@ -96,7 +96,6 @@ int rewrite_matrix_1D(int * row_ptr, int * row_ind, int *col_ind, float * val_in
     int *row_lim = new int[ n_rows];
     lastIdx_tile[0] = 0; 
     int max_active_row = 0;
-    int sh_tile_r=96;
     int last_idx =0 ;
     int g_block_count = 0, min = 999999999;
     unsigned char c[4];
@@ -128,7 +127,7 @@ int rewrite_matrix_1D(int * row_ptr, int * row_ind, int *col_ind, float * val_in
                 //row = count[tile_no-1];//row_ind[idx];
                 //if not active
                 row = row_ind[idx];
-                col = col_ind[idx]%96;
+                col = col_ind[idx]%sh_tile_r;
                 c[0] = (col>>0) & 0xff;
                 c[1] = (row>>16) & 0xFF;
                 c[2] = (row>>8) & 0xFF;

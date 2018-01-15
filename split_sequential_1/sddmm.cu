@@ -14,11 +14,9 @@
 using namespace std;
 
 long n_rows, n_cols, nnz;
-int tile_sizeX = 256; 
-int tile_sizeY = 25000;
-int k=100;
+int tile_sizeX, tile_sizeY, k, actv_row_size;
 int BLOCKSIZE=512;
-int actv_row_size = 96;
+
 inline cudaError_t checkCuda(cudaError_t result, int s){
 
   if (result != cudaSuccess) {
@@ -31,7 +29,7 @@ inline cudaError_t checkCuda(cudaError_t result, int s){
 
 void sddmm_GPU(int * d_row_ptr, int * d_row_ind, int *d_col_ind, float * d_val_ind, float * d_W, float *d_H, 
 int *d_tiled_ind, int *d_lastIdx, int *lastIdx_tile, int *d_lastIdx_block_tile , int *d_active_row, 
-int * count_actv_row, int &max_active_block, int *d_no_block_tile, long new_nnz, int &max_active_row){
+int * count_actv_row, int &max_active_block, int *d_no_block_tile, long new_nnz, int &max_active_row, float *d_p){
     int n_tile = n_cols/tile_sizeX + 1;
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
@@ -48,22 +46,17 @@ int * count_actv_row, int &max_active_block, int *d_no_block_tile, long new_nnz,
     grid.x = n_cols/tile_sizeX+1;
     // grid.x = (32 * n_rows + BLOCKSIZE - 1) / BLOCKSIZE;
     checkCuda(cudaEventRecord(start), __LINE__);
-    // comp_kernel_CSR<<<grid, block, 0, 0>>>(d_row_ptr, d_col_ind, d_val_ind, d_W, d_H, d_p_ind, n_rows, k);
-    //     // cout << "tile "<<tile<<" nnz "<< nnz_tile << " grid "<<grid.x << endl;
-    comp_kernel_COO<<<grid, block, 0, stream[0]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
-    new_nnz, n_rows, n_cols, k, d_active_row, d_lastIdx, d_lastIdx_block_tile, d_no_block_tile, max_active_block, tile_sizeX, max_active_row);
-    // comp_kernel_COO<<<grid, block, 0, stream[0]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
-    // new_nnz, n_rows, n_cols, k, d_lastIdx);
 
+    if(tile_sizeX == 96)
+        comp_kernel_COO<<<grid, block, 0, stream[0]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
+    new_nnz, n_rows, n_cols, k, d_active_row, d_lastIdx, d_lastIdx_block_tile, d_no_block_tile, 
+    max_active_block, tile_sizeX, max_active_row, d_p);
 
-    // for (int tile = 0; tile < n_tile; ++tile){
-    //     int nnz_tile = lastIdx_tile[tile+1]-lastIdx_tile[tile];
-    //     grid.x = (nnz_tile + BLOCKSIZE - 1) / BLOCKSIZE;
-    //     // cout << "tile "<<tile<<" nnz "<< nnz_tile << " grid "<<grid.x << endl;
-    //     comp_kernel_COO_difftile<<<grid,block, 0, stream[tile]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
-    //     nnz, n_cols, k, d_tiled_ind, lastIdx_tile[tile], lastIdx_tile[tile+1], tile);
+    else if(tile_sizeX == 192)
+        comp_kernel_COO_kslc16<<<grid, block, 0, stream[0]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
+    new_nnz, n_rows, n_cols, k, d_active_row, d_lastIdx, d_lastIdx_block_tile, d_no_block_tile, 
+    max_active_block, tile_sizeX, max_active_row, d_p);
 
-    // }
        
     checkCuda(cudaEventRecord(stop), __LINE__);
     cudaEventSynchronize(stop);
@@ -144,7 +137,7 @@ void init(int *rows, int *cols, float* vals){
     int *no_block_tile = new int[n_tile_c];
     int *lastIdx_tile = new int[n_tile_c+1];
     int *lastIdx_block_tile = new int[(n_tile_c+1) * (n_rows/actv_row_size+1)];
-    float *d_val, *d_W, *d_H, *d_W_t;
+    float *d_val, *d_W, *d_H, *d_W_t, *d_p;
     int *d_row_ptr, *d_col_ind, *d_row_ind, *d_tiled_ind, *d_lastIdx, *d_active_row, *d_lastIdx_block_tile, *d_no_block_tile;
 
     int n_tileX = n_cols/tile_sizeX+1; 
@@ -175,7 +168,7 @@ void init(int *rows, int *cols, float* vals){
 
     max_active_row = rewrite_matrix_1D(row_ptr, rows, cols, vals, new_rows, new_cols, new_vals, nnz, n_rows, n_cols, 
         tile_sizeX, tiled_ind, lastIdx_tile, active_row, lastIdx_block_tile, count_actv_row, actv_row_size, new_nnz, 
-        no_block_tile);
+        no_block_tile, actv_row_size);
 
 
   // write_mat(row_ptr, rows, cols, vals, new_rows, new_cols, new_vals, nnz, n_rows, n_cols, 
@@ -196,6 +189,7 @@ void init(int *rows, int *cols, float* vals){
     checkCuda(cudaMalloc((void**)&d_row_ind, new_nnz*sizeof(int)),4);  
     //checkCuda(cudaMalloc((void**)&d_col_ind, new_nnz*sizeof(int)),4);
     checkCuda(cudaMalloc((void**)&d_val, new_nnz*sizeof(float)),4);
+    checkCuda(cudaMalloc((void**)&d_p, new_nnz*sizeof(float)),4);
     checkCuda(cudaMalloc((void**)&d_lastIdx, (n_tile_c+1)*sizeof(float)),4);
     checkCuda(cudaMalloc((void**)&d_no_block_tile, (n_tile_c)*sizeof(float)),4);
     checkCuda(cudaMalloc((void**)&d_active_row, n_tileX*max_active_row*sizeof(int)),4);
@@ -205,7 +199,8 @@ void init(int *rows, int *cols, float* vals){
     checkCuda(cudaMemcpy(d_lastIdx, &(lastIdx_tile[0]), (n_tile_c+1)*sizeof(int), cudaMemcpyHostToDevice),4);   
     checkCuda(cudaMalloc((void**)&d_lastIdx_block_tile, n_tileX*max_active_block*sizeof(int)),4);
     checkCuda(cudaMemcpy(d_no_block_tile, &(no_block_tile[0]), (n_tile_c)*sizeof(int), cudaMemcpyHostToDevice),4);   
-    
+    cudaMemset(d_p, 0, new_nnz*sizeof(float));
+
     for (int i = 0; i < n_tileX; ++i)
         checkCuda(cudaMemcpy(d_lastIdx_block_tile+i*max_active_block, &(lastIdx_block_tile[i*max_active_block]), max_active_block*sizeof(int), cudaMemcpyHostToDevice),4);   
     int sum =0 ;
@@ -228,11 +223,11 @@ void init(int *rows, int *cols, float* vals){
 
 
     sddmm_GPU(d_row_ptr, d_row_ind, d_col_ind, d_val, d_W, d_H, d_tiled_ind, d_lastIdx, lastIdx_tile, 
-    d_lastIdx_block_tile, d_active_row, count_actv_row ,max_active_block, d_no_block_tile, new_nnz, max_active_row );
+    d_lastIdx_block_tile, d_active_row, count_actv_row ,max_active_block, d_no_block_tile, new_nnz, max_active_row, d_p );
     //******** correctness check
     float GPU_tot = 0, CPU_tot =0, CPU_tot_orig =0 ;
     float *p_ind_temp = new float[new_nnz];
-    checkCuda(cudaMemcpy(&(p_ind_temp[0]), d_val, new_nnz*sizeof(float), cudaMemcpyDeviceToHost),4);;    
+    checkCuda(cudaMemcpy(&(p_ind_temp[0]), d_p, new_nnz*sizeof(float), cudaMemcpyDeviceToHost),4);;    
     for (int i = 0; i < nnz; ++i){
         CPU_tot +=  p_ind[tiled_ind[i]];
         CPU_tot_orig +=  p_ind[i];
@@ -296,6 +291,7 @@ int main(int argc, char* argv[]){
     }
     cout << "From main: "<<n_rows << " "<<n_cols <<" "<< nnz << " tile-size: " << tile_sizeX<< " k: "<<k <<  endl;
     nnz=idx;
+    actv_row_size = tile_sizeX;
 
     init(rows, cols, vals);
 }
