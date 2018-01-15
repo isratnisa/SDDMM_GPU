@@ -126,14 +126,16 @@ int rewrite_matrix_1D(int * row_ptr, int * row_ind, int *col_ind, float * val_in
                 //if active
                 //row = count[tile_no-1];//row_ind[idx];
                 //if not active
-                row = row_ind[idx];
-                col = col_ind[idx]%sh_tile_r;
-                c[0] = (col>>0) & 0xff;
-                c[1] = (row>>16) & 0xFF;
-                c[2] = (row>>8) & 0xFF;
-                c[3] = (row>>0) & 0xff;
-                final_int = ((c[1]) << 24) | ((c[2]) << 16) | c[3] << 8 | c[0];
-                new_rows[new_idx] = final_int;
+                if(sh_tile_r < 256){
+                    row = row_ind[idx];
+                    col = col_ind[idx]%sh_tile_r;
+                    c[0] = (col>>0) & 0xff;
+                    c[1] = (row>>16) & 0xFF;
+                    c[2] = (row>>8) & 0xFF;
+                    c[3] = (row>>0) & 0xff;
+                    final_int = ((c[1]) << 24) | ((c[2]) << 16) | c[3] << 8 | c[0];
+                    new_rows[new_idx] = final_int;
+                }
                 // ******* bit mask finish ******
 
                 new_vals[new_idx] = val_ind[idx];

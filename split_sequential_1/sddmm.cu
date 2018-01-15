@@ -57,6 +57,17 @@ int * count_actv_row, int &max_active_block, int *d_no_block_tile, long new_nnz,
     new_nnz, n_rows, n_cols, k, d_active_row, d_lastIdx, d_lastIdx_block_tile, d_no_block_tile, 
     max_active_block, tile_sizeX, max_active_row, d_p);
 
+    else if(tile_sizeX == 384)
+        comp_kernel_COO_kslc8<<<grid, block, 0, stream[0]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
+    new_nnz, n_rows, n_cols, k, d_active_row, d_lastIdx, d_lastIdx_block_tile, d_no_block_tile, 
+    max_active_block, tile_sizeX, max_active_row, d_p);
+
+    else if(tile_sizeX == 768)
+        comp_kernel_COO_kslc4<<<grid, block, 0, stream[0]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
+    new_nnz, n_rows, n_cols, k, d_active_row, d_lastIdx, d_lastIdx_block_tile, d_no_block_tile, 
+    max_active_block, tile_sizeX, max_active_row, d_p);
+
+
        
     checkCuda(cudaEventRecord(stop), __LINE__);
     cudaEventSynchronize(stop);
@@ -186,15 +197,17 @@ void init(int *rows, int *cols, float* vals){
     checkCuda(cudaMalloc((void**)&d_W, k*n_rows*sizeof(float)),0); 
     checkCuda(cudaMalloc((void**)&d_H, k*n_cols*sizeof(float)),1);
     // checkCuda(cudaMalloc((void**)&d_row_ptr, (n_rows+1)*sizeof(int)),2);   
-    checkCuda(cudaMalloc((void**)&d_row_ind, new_nnz*sizeof(int)),4);  
-    //checkCuda(cudaMalloc((void**)&d_col_ind, new_nnz*sizeof(int)),4);
+    checkCuda(cudaMalloc((void**)&d_row_ind, new_nnz*sizeof(int)),4);
+    if(actv_row_size > 256)  
+        checkCuda(cudaMalloc((void**)&d_col_ind, new_nnz*sizeof(int)),4);
     checkCuda(cudaMalloc((void**)&d_val, new_nnz*sizeof(float)),4);
     checkCuda(cudaMalloc((void**)&d_p, new_nnz*sizeof(float)),4);
     checkCuda(cudaMalloc((void**)&d_lastIdx, (n_tile_c+1)*sizeof(float)),4);
     checkCuda(cudaMalloc((void**)&d_no_block_tile, (n_tile_c)*sizeof(float)),4);
     checkCuda(cudaMalloc((void**)&d_active_row, n_tileX*max_active_row*sizeof(int)),4);
     checkCuda(cudaMemcpy(d_row_ind,  &(new_rows[0]), new_nnz*sizeof(int), cudaMemcpyHostToDevice),4);
-    //checkCuda(cudaMemcpy(d_col_ind, &(new_cols[0]), new_nnz*sizeof(int), cudaMemcpyHostToDevice),4);
+    if(actv_row_size > 256)  
+        checkCuda(cudaMemcpy(d_col_ind, &(new_cols[0]), new_nnz*sizeof(int), cudaMemcpyHostToDevice),4);
     checkCuda(cudaMemcpy(d_val, &(new_vals[0]), new_nnz*sizeof(float), cudaMemcpyHostToDevice),4);
     checkCuda(cudaMemcpy(d_lastIdx, &(lastIdx_tile[0]), (n_tile_c+1)*sizeof(int), cudaMemcpyHostToDevice),4);   
     checkCuda(cudaMalloc((void**)&d_lastIdx_block_tile, n_tileX*max_active_block*sizeof(int)),4);
