@@ -217,6 +217,90 @@ __global__ void comp_kernel_COO_kslc16(int const* __restrict__ row_ind, int cons
 }
 
 
+//W_t and H_t instead of W and H
+__global__ void comp_kernel_COO_kslc16_adv(int const* __restrict__ row_ind, int const* __restrict__ col_ind, float *val, const float * __restrict__ u, const float * __restrict__ v, 
+  int nnz, int n_rows, int n_cols, int k, int *active_row, int *tile_limIdx, int * lastIdx_block_tile, 
+  int *no_block_tile, int max_active_block, int tile_size, int max_active_row, float * p){
+    unsigned int tId = threadIdx.x;
+    unsigned int laneId = tId & 1;
+    int tile_st = tile_limIdx[blockIdx.x];
+    int tile_end = tile_limIdx[blockIdx.x+1];
+    //__shared__ float sh_c[180*32];
+    __shared__ float sh_c[192*16];
+    __shared__ float sh_r[192*16];
+    int tile_no = blockIdx.x;
+    int sh_tile = 192;
+    int sh_tile_r = 192;
+    int k_slc = 16;
+    int tile  = blockIdx.x;// col/tile_size;
+    int WARP_SIZE = 32;
+    int WARP_ID = tId >> 5;
+    int tid_in_WARP = tId & 31;
+    int step = blockDim.x >> 5;
+    int kid = WARP_ID % 6; //last WARPS??
+
+    for (int inner_t = 0; inner_t < k; inner_t+=k_slc){
+        unsigned int c = tId + tile_st;      
+        int t = tid_in_WARP;
+
+        if(WARP_ID < 12)
+        for (int i = WARP_ID ; i < (6 * k_slc) && (i*WARP_SIZE + t) < n_cols; i+=12){
+            kid = i/6 ;
+            sh_c[((WARP_ID%6)*WARP_SIZE + t) *  k_slc + kid ] = v[ (kid + inner_t) * n_cols + (tile * sh_tile + ((WARP_ID%6)*WARP_SIZE +  t))]; //v[(tile * sh_tile + i) * k + inner_t+t];
+        }                 
+        __syncthreads();
+
+        int g_n_blocks = no_block_tile[blockIdx.x]; int n_blocks=0;
+        if(blockIdx.x == 0) n_blocks =  no_block_tile[blockIdx.x];
+        else n_blocks =  no_block_tile[blockIdx.x] - no_block_tile[blockIdx.x-1];
+      
+        int block_st = tile_st;// lastIdx_block_tile[g_n_blocks + block-1];
+        for (int block = 0; block < n_blocks ; block++){          
+            int block_end = lastIdx_block_tile[tile * max_active_block + block];
+            // WARP_SIZE = 32;
+            // WARP_ID = tId >> 4;
+            // tid_in_WARP = tId & 15;
+
+            // step = blockDim.x >> 4;
+            // for (int i = WARP_ID; i < sh_tile_r && i < n_rows; i+=step){
+            //     //if active
+            //     //sh_r[i *  k + t] = u[(active_row[(tile*max_active_row) + (block * sh_tile_r + i)]) * k + t];
+            //     //if not active
+            //     sh_r[i *  k_slc + t] = u[ (block * sh_tile_r + i) * k + inner_t+t];
+
+            // }  
+            // __syncthreads();
+
+            for (int c = (tId >> 1)  + block_st; c < block_end && c< nnz; c+=(blockDim.x >> 1)){
+                float sm =0, sm1 =0, sm2=0, sm3=0, sm4=0;
+                // int row = row_ind[c];
+                // int col = col_ind[c];
+                int row = row_ind[c] >> 8;
+                int col = tile*sh_tile + (row_ind[c] & 0xff);
+
+                int active_row_ = active_row[(tile*max_active_row) + row];
+
+                int passive_row = row;
+                int sh_row = row - block * sh_tile;
+                int sh_col = col - tile * sh_tile;
+
+                for (int t = laneId*8; t < (laneId+1)*8; t+=4){
+                    float4 rtmp1 = *((float4*) &u[row * k + inner_t+ t]); 
+                    float4 ctmp1 = *((float4*) &sh_c[sh_col * k_slc + t]);
+                    sm1+= rtmp1.x * ctmp1.x + rtmp1.y * ctmp1.y +  rtmp1.z * ctmp1.z +  rtmp1.w * ctmp1.w ;                    
+                }
+                sm1 += __shfl_xor(sm1, 1);
+                //sm2 += __shfl_xor(sm2, 1);
+                p[c] += val[c] * (sm1 + sm2);
+            }
+            block_st = block_end;   
+            __syncthreads();         
+        }  
+   }  
+}
+
+
+
 __global__ void comp_kernel_COO(int const* __restrict__ row_ind, int const* __restrict__ col_ind, float *val, const float * __restrict__ u, const float * __restrict__ v, 
   int nnz, int n_rows, int n_cols, int k, int *active_row, int *tile_limIdx, int * lastIdx_block_tile, 
   int *no_block_tile, int max_active_block, int tile_size, int max_active_row, float *p){

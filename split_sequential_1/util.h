@@ -182,7 +182,8 @@ void write_mat(int * row_ptr, int * row_ind, int *col_ind, float * val_ind,
     int TS, int TS_Y, int *tiled_ind, int * lastIdx_tile,  int block, long &new_nnz){
     
     ofstream myfile;
-    myfile.open ("dense_ny1.txt");
+    myfile.open ("dense_pubmed250k.txt");
+    myfile << "%%260 8192175 109266398 \n";
     myfile << "%%MatrixMarket matrix coordinate real general\n";
     
     int tot_act =0, d_row_counter=0;

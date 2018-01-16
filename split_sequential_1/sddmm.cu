@@ -53,9 +53,13 @@ int * count_actv_row, int &max_active_block, int *d_no_block_tile, long new_nnz,
     max_active_block, tile_sizeX, max_active_row, d_p);
 
     else if(tile_sizeX == 192)
-        comp_kernel_COO_kslc16<<<grid, block, 0, stream[0]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
+        comp_kernel_COO_kslc16_adv<<<grid, block, 0, stream[0]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
     new_nnz, n_rows, n_cols, k, d_active_row, d_lastIdx, d_lastIdx_block_tile, d_no_block_tile, 
     max_active_block, tile_sizeX, max_active_row, d_p);
+    //change W_t H_t
+    //     comp_kernel_COO_kslc16<<<grid, block, 0, stream[0]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
+    // new_nnz, n_rows, n_cols, k, d_active_row, d_lastIdx, d_lastIdx_block_tile, d_no_block_tile, 
+    // max_active_block, tile_sizeX, max_active_row, d_p);
 
     else if(tile_sizeX == 384)
         comp_kernel_COO_kslc8<<<grid, block, 0, stream[0]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
@@ -231,8 +235,8 @@ void init(int *rows, int *cols, float* vals){
 
     cudaMemcpy(d_W, &(W[0]),  n_rows * k *sizeof(float), cudaMemcpyHostToDevice);
     //cudaMemcpy(d_W, &(W_t[0]),  n_rows * k *sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_H, &(H[0]),  n_cols * k *sizeof(float), cudaMemcpyHostToDevice);  
-    //cudaMemcpy(d_H, &(H_t[0]),  n_cols * k *sizeof(float), cudaMemcpyHostToDevice);  
+    //cudaMemcpy(d_H, &(H[0]),  n_cols * k *sizeof(float), cudaMemcpyHostToDevice);  
+    cudaMemcpy(d_H, &(H_t[0]),  n_cols * k *sizeof(float), cudaMemcpyHostToDevice);  
 
 
     sddmm_GPU(d_row_ptr, d_row_ind, d_col_ind, d_val, d_W, d_H, d_tiled_ind, d_lastIdx, lastIdx_tile, 
