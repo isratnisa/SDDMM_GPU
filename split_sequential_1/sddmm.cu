@@ -15,7 +15,7 @@ using namespace std;
 
 long n_rows, n_cols, nnz;
 int tile_sizeX, tile_sizeY, k, actv_row_size;
-int BLOCKSIZE=512;
+int BLOCKSIZE=1024;
 
 inline cudaError_t checkCuda(cudaError_t result, int s){
 
@@ -53,25 +53,31 @@ int * count_actv_row, int &max_active_block, int *d_no_block_tile, long new_nnz,
     max_active_block, tile_sizeX, max_active_row, d_p);
 
     else if(tile_sizeX == 192)
+        //change orientation of W and H 
         comp_kernel_COO_kslc16_adv<<<grid, block, 0, stream[0]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
     new_nnz, n_rows, n_cols, k, d_active_row, d_lastIdx, d_lastIdx_block_tile, d_no_block_tile, 
     max_active_block, tile_sizeX, max_active_row, d_p);
-    //change W_t H_t
     //     comp_kernel_COO_kslc16<<<grid, block, 0, stream[0]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
     // new_nnz, n_rows, n_cols, k, d_active_row, d_lastIdx, d_lastIdx_block_tile, d_no_block_tile, 
     // max_active_block, tile_sizeX, max_active_row, d_p);
 
     else if(tile_sizeX == 384)
+        //change orientation
         comp_kernel_COO_kslc8<<<grid, block, 0, stream[0]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
     new_nnz, n_rows, n_cols, k, d_active_row, d_lastIdx, d_lastIdx_block_tile, d_no_block_tile, 
     max_active_block, tile_sizeX, max_active_row, d_p);
 
     else if(tile_sizeX == 768)
+        //change orientation
         comp_kernel_COO_kslc4<<<grid, block, 0, stream[0]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
     new_nnz, n_rows, n_cols, k, d_active_row, d_lastIdx, d_lastIdx_block_tile, d_no_block_tile, 
     max_active_block, tile_sizeX, max_active_row, d_p);
 
-
+    else if(tile_sizeX >= 1024)
+        //change orientation
+        comp_kernel_COO_DGEMM<<<grid, block, 0, stream[0]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
+    new_nnz, n_rows, n_cols, k, d_active_row, d_lastIdx, d_lastIdx_block_tile, d_no_block_tile, 
+    max_active_block, tile_sizeX, max_active_row, d_p);
        
     checkCuda(cudaEventRecord(stop), __LINE__);
     cudaEventSynchronize(stop);
@@ -233,8 +239,8 @@ void init(int *rows, int *cols, float* vals){
     }
     // checkCuda(cudaMemcpy(d_tiled_ind, &(tiled_ind[0]), nnz*sizeof(int), cudaMemcpyHostToDevice),4);;    
 
-    cudaMemcpy(d_W, &(W[0]),  n_rows * k *sizeof(float), cudaMemcpyHostToDevice);
-    //cudaMemcpy(d_W, &(W_t[0]),  n_rows * k *sizeof(float), cudaMemcpyHostToDevice);
+    //cudaMemcpy(d_W, &(W[0]),  n_rows * k *sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_W, &(W_t[0]),  n_rows * k *sizeof(float), cudaMemcpyHostToDevice);
     //cudaMemcpy(d_H, &(H[0]),  n_cols * k *sizeof(float), cudaMemcpyHostToDevice);  
     cudaMemcpy(d_H, &(H_t[0]),  n_cols * k *sizeof(float), cudaMemcpyHostToDevice);  
 
@@ -306,9 +312,11 @@ int main(int argc, char* argv[]){
         vals[idx]=vid;
         idx++;
     }
-    cout << "From main: "<<n_rows << " "<<n_cols <<" "<< nnz << " tile-size: " << tile_sizeX<< " k: "<<k <<  endl;
-    nnz=idx;
     actv_row_size = tile_sizeX;
+    cout << "row, col, nnz: "<<n_rows << " "<<n_cols <<" "<< nnz << endl;
+    cout << " tile-sizeX: " << tile_sizeX <<  " tile-sizeY: " << actv_row_size << " k: "<<k <<  endl;
+    nnz=idx;
+    
 
     init(rows, cols, vals);
 }

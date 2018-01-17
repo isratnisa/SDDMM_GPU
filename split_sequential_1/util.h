@@ -6,7 +6,7 @@
 #include <time.h>
 #include <sys/time.h>
 using namespace std;
-int dense_th = 10000;
+int dense_th = 0000;
 inline double seconds(){
     struct timeval tp;
     gettimeofday(&tp, NULL);
