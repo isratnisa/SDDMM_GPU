@@ -1,6 +1,6 @@
 // with VWARP more K
 __global__ void comp_kernel_COO(int const* __restrict__ row_ind, int const* __restrict__ col_ind, float *val, const float * __restrict__ u, const float * __restrict__ v, int nnz, int n_rows, int n_cols, int k, 
-		int tile_stIdx, int tile_limIdx, int *d_last_blockIdx,int *active_row, int tile_no, int t_st, int act_rlimit)
+		int tile_stIdx, int tile_limIdx, int *d_last_blockIdx,int *active_row, int tile_no, int t_st, int act_rlimit, int sh_tile, int k_slc)
 {
 	unsigned int tId = threadIdx.x;
 	unsigned int laneId = tId & 1;
@@ -9,31 +9,21 @@ __global__ void comp_kernel_COO(int const* __restrict__ row_ind, int const* __re
 	if(blockIdx.x==0) block_st = tile_stIdx;
 	else block_st=d_last_blockIdx[blockIdx.x-1];
 	int block_lim=d_last_blockIdx[blockIdx.x];
-	// if(blockIdx.x > 1660 && tId == 0)
-	//     printf("block lim %d %d %d\n", blockIdx.x, block_st, block_lim );
 
-	__shared__ float sh_r[32*180]; 
-	int sh_tile = 180;
+	__shared__ float sh_r[32*192]; 
 	int WARP_ID = tId >> 5;
 	int tid_in_WARP = tId & 31;
-	// for (int t = 0; t < k; ++t){
-	//     for (int i = tId; i < sh_tile && (i +(tile_no*sh_tile)) < n_rows; i+=blockDim.x){
-	//         sh_r[t * sh_tile + i] = u[ (t * n_rows) + active_row[blockIdx.x*sh_tile+i]];
-	//     }
-	// }    
+	int WARP_SIZE = 32;
+   
 	int step = blockDim.x >> 5;
 
 	int t = tid_in_WARP; 
-	//if(tile_no == 5)
-	{
-		for (int i = WARP_ID; i < sh_tile && (blockIdx.x*sh_tile+i) < act_rlimit; i+=step){
-			//     if(tile_no == 0 && tId == 0 && blockIdx.x > 1660)
-			// printf("GPU  %d %f\n", blockIdx.x, u[active_row[blockIdx.x*sh_tile+i] *k + tt + t_st] );
 
-			sh_r[i *  32 + t] = u[active_row[blockIdx.x*sh_tile+i] * k + (t + t_st)  ];
-		}
-
+	for (int i = WARP_ID; i < sh_tile && (blockIdx.x*sh_tile+i) < act_rlimit; i+=step){
+		for (int w_r = 0; w_r < k_slc; w_r+=WARP_SIZE)
+			sh_r[i *  k_slc + t + w_r] = u[active_row[blockIdx.x*sh_tile+i] * k + t + t_st + w_r  ];
 	}
+	
 	__syncthreads();
 
 	for (int c = block_st + (tId >> 1); c < block_lim; c+=(blockDim.x >> 1)){
@@ -42,12 +32,13 @@ __global__ void comp_kernel_COO(int const* __restrict__ row_ind, int const* __re
 		int col = col_ind[c];
 		int sh_row = row - blockIdx.x * sh_tile;
 
-		for (int t = laneId*16; t < (laneId+1)*16; t+=8){
-			float4 rtmp1 = *((float4*) &sh_r[sh_row * 32 + t]); 
+		//for (int t = laneId*16; t < (laneId+1)*16; t+=8){
+		for (int t = laneId*k_slc/2; t < (laneId+1)*k_slc/2; t+=8){
+			float4 rtmp1 = *((float4*) &sh_r[sh_row * k_slc + t]); 
 			float4 ctmp1 = *((float4*) &v[col * k + t_st + t ]);
 			sm1+= rtmp1.x * ctmp1.x + rtmp1.y * ctmp1.y +  rtmp1.z * ctmp1.z +  rtmp1.w * ctmp1.w ; 
 
-			float4 rtmp2 = *((float4*) &sh_r[sh_row * 32 + t+4]); 
+			float4 rtmp2 = *((float4*) &sh_r[sh_row * k_slc + t+4]); 
 			float4 ctmp2 = *((float4*) &v[ col * k + t_st + t+4]);
 			sm2+= rtmp2.x * ctmp2.x + rtmp2.y * ctmp2.y +  rtmp2.z * ctmp2.z +  rtmp2.w * ctmp2.w ; 
 		}

@@ -18,6 +18,7 @@ int actv_row_size = 180;
 int tile_sizeX = 256; 
 int tile_sizeY = 25000;
 int k=100;
+int SM_CAPACITY = 6144;
 int BLOCKSIZE=512;
 inline cudaError_t checkCuda(cudaError_t result, int s){
 
@@ -43,33 +44,27 @@ int * count_actv_row, int &max_active_block, long new_nnz){
     float mili =0, copyTime = 0 ;
   
     dim3 block(BLOCKSIZE,1,1), grid(1,1,1);
-    //grid.x = (new_nnz + BLOCKSIZE - 1) / BLOCKSIZE;
-    //grid.x = n_cols/tile_sizeX+1;
-    // grid.x = (32 * n_rows + BLOCKSIZE - 1) / BLOCKSIZE;
-    checkCuda(cudaEventRecord(start), __LINE__);
-    // comp_kernel_CSR<<<grid, block, 0, 0>>>(d_row_ptr, d_col_ind, d_val_ind, d_W, d_H, d_p_ind, n_rows, k);
-    //     // cout << "tile "<<tile<<" nnz "<< nnz_tile << " grid "<<grid.x << endl;
-    // comp_kernel_COO<<<grid, block, 0, stream[0]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
-    // new_nnz, n_rows, n_cols, k, d_active_row, d_lastIdx, tile_sizeX);
-
     int sum = 0, t_st =0 ;
+
+    int k_slice = SM_CAPACITY/actv_row_size;
+    // cout << "k_slice " << k_slice << endl;
+    checkCuda(cudaEventRecord(start), __LINE__);
+
     for (int tile = 0; tile < n_tile; ++tile){
         int nnz_tile = lastIdx_tile[tile+1]-lastIdx_tile[tile];
         //grid.x = (nnz_tile + BLOCKSIZE - 1) / BLOCKSIZE;
         int active_block_this_tile = count_actv_row[tile]/actv_row_size+1;
-        //change this
+        
         grid.x = active_block_this_tile;
-        cout << "tile "<<tile<<" nnz "<< nnz_tile << " grid "<<grid.x <<" "<<count_actv_row[tile]<< endl;
-        for (int t_st = 0; t_st < k ; t_st +=32){
+        // cout << "tile "<<tile<<" nnz "<< nnz_tile << " grid "<<grid.x <<" "<<count_actv_row[tile]<< endl;
+        for (int t_st = 0; t_st < k ; t_st +=k_slice){
             comp_kernel_COO<<<grid,block, 0, stream[0]>>>(d_row_ind, d_col_ind, d_val_ind, d_W, d_H, 
             nnz, n_rows, n_cols, k, lastIdx_tile[tile], lastIdx_tile[tile+1], &(d_lastIdx_block_tile[(tile)*max_active_block]), 
-            d_active_row+sum, tile, t_st, count_actv_row[tile]);
+            d_active_row+sum, tile, t_st, count_actv_row[tile], actv_row_size, k_slice);
         }
         sum += count_actv_row[tile];
 
-    }
-    cout << "amigo done\n";
-       
+    }       
     checkCuda(cudaEventRecord(stop), __LINE__);
     cudaEventSynchronize(stop);
     //cudaDeviceSynchronize();
@@ -101,11 +96,7 @@ void sddmm_CPU_CSR(int * row_ptr, int *col_ind, float * val_ind, float * W, floa
 
            
         }                
-    }
-    cout << "CPU tot " << tot << endl;
-    for (int r = 500000; r < 500005; ++r)
-        // for (int ind = row_ptr[r]; ind < row_ptr[r+1]; ++ind)
-            cout << "row " << r << " "  <<" "<< p_ind[r]<< endl;  
+    } 
 }
 
 void sddmm_CPU_COO(int * row_ind, int *col_ind, float * val_ind, float * W, float *H, float * p_ind){
@@ -127,7 +118,7 @@ void sddmm_CPU_COO(int * row_ind, int *col_ind, float * val_ind, float * W, floa
     double CPU_time = omp_get_wtime() - start_time;
     //correctness check
 
-    printf("\nomp time CPU : %.4f \n\n", CPU_time*1000);
+    // printf("\nomp time CPU : %.4f \n\n", CPU_time*1000);
 }
 
 
@@ -159,7 +150,6 @@ void init(int *rows, int *cols, float* vals){
     make_HTasH(H, H_t, n_cols, k);
     make_HTasH(W, W_t, n_rows, k);
     
-    cout << n_cols <<" "<<n_tile_c << endl;
     int *new_rows = new int[nnz + n_tile_c * BLOCKSIZE - 1];
     int *new_cols = new int[nnz + n_tile_c * BLOCKSIZE - 1];
     float *new_vals = new float[nnz + n_tile_c * BLOCKSIZE - 1];
@@ -179,7 +169,7 @@ void init(int *rows, int *cols, float* vals){
 
     max_active_row = rewrite_matrix_1D(row_ptr, rows, cols, vals, new_rows, new_cols, new_vals, nnz, n_rows, n_cols, 
         tile_sizeX, tiled_ind, lastIdx_tile, active_row, passive_row, count_actv_row, lastIdx_block_tile, actv_row_size, 
-         new_nnz, row_holder);
+         new_nnz, row_holder, actv_row_size);
 
     // rewrite_col_sorted_matrix(row_ptr, rows, cols, vals, new_rows, new_cols, new_vals, nnz, n_rows, n_cols, 
     //     tile_sizeX, tiled_ind, lastIdx_tile, BLOCKSIZE, new_nnz);
@@ -246,22 +236,22 @@ void init(int *rows, int *cols, float* vals){
         // cout << "p_ind " << p_ind[tiled_ind[i]] << " " << p_ind[i] << " new,old ind: "<<tiled_ind[i] <<" "<<i<< endl;
     }
 
-    for (int i = 137362; i <  137362+3; ++i)
-            cout << "gp idx " << i << " "  <<" GPU "<< p_ind_temp[i] << " CPU "<< p_ind[tiled_ind[i]]<<endl;  
-    for (int i = nnz-1; i > nnz-3; --i)
-             cout << "gp idx " << i << " "  <<" GPU "<< p_ind_temp[i] << " CPU "<< p_ind[tiled_ind[i]]<<endl;  
-    long diff_tot = 0; 
-    for (int i = 0; i < new_nnz; ++i){
-        //if(p_ind_temp[i] != 0)
-        {
-           if(abs(p_ind_temp[i]-p_ind[tiled_ind[i]]) > .000001){
-                diff_tot ++;
-                if(diff_tot < 5)
-                    printf("CPU GPU diff %d:  %f %f %f \n", i, p_ind_temp[i], p_ind[tiled_ind[i]],p_ind_temp[i]-p_ind[tiled_ind[i]] );
-            }
-        }
-    }
-    cout << "diff values in CPU and GPU: " << diff_tot << endl;
+    // for (int i = 137362; i <  137362+3; ++i)
+    //         cout << "gp idx " << i << " "  <<" GPU "<< p_ind_temp[i] << " CPU "<< p_ind[tiled_ind[i]]<<endl;  
+    // for (int i = nnz-1; i > nnz-3; --i)
+    //          cout << "gp idx " << i << " "  <<" GPU "<< p_ind_temp[i] << " CPU "<< p_ind[tiled_ind[i]]<<endl;  
+    // long diff_tot = 0; 
+    // for (int i = 0; i < new_nnz; ++i){
+    //     //if(p_ind_temp[i] != 0)
+    //     {
+    //        if(abs(p_ind_temp[i]-p_ind[tiled_ind[i]]) > .000001){
+    //             diff_tot ++;
+    //             if(diff_tot < 5)
+    //                 printf("CPU GPU diff %d:  %f %f %f \n", i, p_ind_temp[i], p_ind[tiled_ind[i]],p_ind_temp[i]-p_ind[tiled_ind[i]] );
+    //         }
+    //     }
+    // }
+    // cout << "diff values in CPU and GPU: " << diff_tot << endl;
 
     //freeing device allocation
     cudaFree( d_row_ptr );
@@ -282,12 +272,15 @@ void init(int *rows, int *cols, float* vals){
 int main(int argc, char* argv[]){ 
     ifstream fp(argv[1]);   
     k = atoi(argv[2]);
-    tile_sizeX = atoi(argv[3]);  
+    tile_sizeY = atoi(argv[3]);  
+    tile_sizeX = atoi(argv[4]); 
+    actv_row_size = tile_sizeY;  
     string str;  
     fp >> str;
     while(!isdigit(str[0])){
         getline(fp,str);
     }
+
     istringstream is(str);
     is >> n_rows; 
     is >> n_cols; 
@@ -306,7 +299,7 @@ int main(int argc, char* argv[]){
         vals[idx]=vid;
         idx++;
     }
-    cout << "From main: "<<n_rows << " "<<n_cols <<" "<< nnz << " tile-size: " << tile_sizeX<< " k: "<<k << " TB: "<< BLOCKSIZE<< endl;
+    // cout << "From main: "<<n_rows << " "<<n_cols <<" "<< nnz << " tile-size: " << tile_sizeX<< " k: "<<k << " TB: "<< BLOCKSIZE<< endl;
     nnz=idx;
 
     init(rows, cols, vals);

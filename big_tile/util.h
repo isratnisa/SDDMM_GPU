@@ -213,7 +213,7 @@ void rewrite_col_sorted_matrix(int * row_ptr, int * row_ind, int *col_ind, float
 int rewrite_matrix_1D(int * row_ptr, int * row_ind, int *col_ind, float * val_ind, 
     int *new_rows, int *new_cols, float * new_vals, long nnz, long n_rows, long n_cols,
     int TS, int *tiled_ind, int * lastIdx_tile, int *active_row, int *passive_row, int *count, 
-    int *lastIdx_block_tile, int &actv_row_size, long &new_nnz, int * row_holder){
+    int *lastIdx_block_tile, int &actv_row_size, long &new_nnz, int * row_holder, int max_sh_row){
 
     long new_idx = 0, idx =0;
     int max_block_inAtile = n_rows/actv_row_size+1;
@@ -221,7 +221,6 @@ int rewrite_matrix_1D(int * row_ptr, int * row_ind, int *col_ind, float * val_in
     int *row_lim = new int[ n_rows];
     lastIdx_tile[0] = 0; 
     int max_active_row = 0;
-    int max_sh_row = 180;
     unsigned char c[4];
     int row =0;
     int col =0;
@@ -273,13 +272,13 @@ int rewrite_matrix_1D(int * row_ptr, int * row_ind, int *col_ind, float * val_in
                 cur_block++;
             }  
             row_lim[holder] = idx;   
-            if(cur_block >= 180) { 
+            if(cur_block >= max_sh_row) { 
                 cur_block = 0;
                 lastIdx_block_tile[(tile_no-1)* max_block_inAtile + block_count] = new_idx; 
                 block_count++;  
             } 
         
-            if(holder == n_rows-1 && cur_block > 0 && cur_block < 180)
+            if(holder == n_rows-1 && cur_block > 0 && cur_block < max_sh_row)
                 lastIdx_block_tile[(tile_no-1)* max_block_inAtile + block_count] = new_idx; 
         }
         if(count[tile_no-1] > max_active_row)
