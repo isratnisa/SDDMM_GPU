@@ -13,15 +13,20 @@ Supoprts Matrix Market (https://sparse.tamu.edu/about) input format. Currently s
 
 ## Build 
 
-`cd HiPC18/src`
+`cd HiPC18/src`  
 `$ make`  
 
 ## Run
 
-`$ ./sddmm ../../dataset/nips.mtx K tile_size_X tile_size_Y`
+`$ ./sddmm input K tile_size_X tile_size_Y`
 
 Example:
-`./sddmm nytimes.mtx 128 192 50000`
+`./sddmm ../../dataset/nips.mtx 256 192 50000`
+
+```
+options:   
+        -K rank/feature : set the rank 
+        -tile_size_X, tile_size_Y: tile/block size for W and H 
 
        
 
