@@ -1,5 +1,0 @@
-if using shared for W, then follow this. Otherwise comment the other line instead/
-[new_idx] = count[tile_no-1];//row_ind[idx];
-//new_rows[new_idx] = row_ind[idx];
-
-u know what to do in kernel.h
