@@ -7,11 +7,25 @@
 #include <time.h>
 #include <sys/time.h>
 using namespace std;
+
 inline double seconds(){
     struct timeval tp;
     gettimeofday(&tp, NULL);
     return ((double)tp.tv_sec + (double)tp.tv_usec * 1.e-6);
 }
+
+class Matrix
+{
+public:
+    long n_rows, n_cols;
+    long nnz;
+
+    vector<int> rows;
+    vector<int> cols;
+    vector<float> vals; 
+    
+};
+
 void make_HTasH(float *H, float *H_t, int n_cols, int k){
     for(long r = 0; r < n_cols; ++r){
         for(long t = 0; t < k; ++t)
@@ -75,7 +89,7 @@ void unsorted_make_CSR(int *rows, int *cols, float * vals, long nnz, long n_rows
 }
 // void make_tile(smat_t &R, mat_int &tiled_bin, const int TS)
 
-void make_CSR(int *rows, int *cols, float * vals, long nnz, long n_rows, int *row_ptr, int* row_holder){
+void make_CSR(vector<int> rows, vector<int> cols, vector<float> vals, long nnz, long n_rows, int *row_ptr, int* row_holder){
     //assuming sorted
     
     //if CSR
@@ -210,7 +224,7 @@ void rewrite_col_sorted_matrix(int * row_ptr, int * row_ind, int *col_ind, float
 }
 
 
-int rewrite_matrix_1D(int * row_ptr, int * row_ind, int *col_ind, float * val_ind, 
+int rewrite_matrix_1D(int * row_ptr, vector <int> row_ind, vector <int> col_ind, vector <float>  val_ind, 
     int *new_rows, int *new_cols, float * new_vals, long nnz, long n_rows, long n_cols,
     int TS, int *tiled_ind, int * lastIdx_tile, int *active_row, int *passive_row, int *count, 
     int *lastIdx_block_tile, int &actv_row_size, long &new_nnz, int * row_holder, int max_sh_row){
