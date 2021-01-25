@@ -32,6 +32,7 @@ inline cudaError_t checkCuda(cudaError_t result, int s){
 void sddmm_GPU(int * d_row_ptr, int * d_row_ind, int *d_col_ind, float * d_val_ind, float * d_W, float *d_H, 
 int *d_tiled_ind, int *d_lastIdx, int *lastIdx_tile, int *d_lastIdx_block_tile ,int *d_active_row, int *d_passive_row, 
 int * count_actv_row, int &max_active_block, long new_nnz){
+
     int n_tile = n_cols/tile_sizeX + 1;
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
@@ -157,12 +158,11 @@ void init(int *rows, int *cols, float* vals){
     int *tiled_ind = new int [nnz + n_tile_c * BLOCKSIZE - 1];
     int *active_row = new int[n_tileX * n_rows];
     int *passive_row = new int[n_tileX * n_rows];
-    // int *new_rows = new int[nnz];
-    // int *new_cols = new int[nnz];
-    // float *new_vals = new float[nnz];
+
     //converting col sorted matrix to row sorted
     //unsorted_make_CSR(rows, cols, vals, nnz, n_rows, n_cols, row_ptr);
     //assuming sorted
+    
     make_CSR(rows, cols, vals, nnz, n_rows, row_ptr, row_holder);
     //comp_bin(n_bin, count, n_rows, row_ptr, nnz);
     int max_active_row=0;
