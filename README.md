@@ -3,7 +3,7 @@ Sampled Dense-Dense Matrix Multiplication (SDDMM) is a primitive that has been s
 
 ## Input format
 
-Suports Matrix Market (https://sparse.tamu.edu/about) input format. 
+Supoprts Matrix Market (https://sparse.tamu.edu/about) input format. 
 
 ## Build requirements:
 - GCC Compiler 
