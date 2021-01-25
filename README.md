@@ -8,6 +8,7 @@ Supoprts Matrix Market (https://sparse.tamu.edu/about) input format.
 ## Build requirements:
 - GCC Compiler 
 - CUDA SDK
+- OpenMP
 
 
 ## Build 
