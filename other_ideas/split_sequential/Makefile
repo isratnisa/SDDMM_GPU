@@ -7,7 +7,7 @@ CXXFLAGS=-O3 -std=c++11 -g
 #NVCCFLAGS +=-O3 -fopenmp -w -restrict #--ptxas-options=-v
 #NVCCFLAGS +=-O3 -w -gencode arch=compute_35,code=sm_35 -rdc=true -Xptxas -dlcm=ca -Xcompiler -fopenmp
 # -dc -G --restrict -m64 -Xcompiler -Wall
-NVCCFLAGS += -O3 -w -arch=sm_35 -rdc=true -Xptxas -dlcm=ca -Xcompiler -fopenmp --std=c++11 -m64 -lineinfo #-g -G
+NVCCFLAGS += -O3 -w -arch=sm_37 -rdc=true -Xptxas -dlcm=ca -Xcompiler -fopenmp --std=c++11 -m64 -lineinfo #-g -G
 NVCCLINKFLAGS = -L$(NVCC_LIB_PATH) -lcudart
 VERSION=1.41
 
