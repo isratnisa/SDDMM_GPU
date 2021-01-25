@@ -14,6 +14,10 @@ inline double seconds(){
     return ((double)tp.tv_sec + (double)tp.tv_usec * 1.e-6);
 }
 
+int actv_row_size = 180;
+int SM_CAPACITY = 6144;
+int BLOCKSIZE=512;
+
 class Matrix
 {
 public:
@@ -26,14 +30,49 @@ public:
     
 };
 
-void make_HTasH(float *H, float *H_t, int n_cols, int k){
+class TiledMatrix
+{
+public:
+    int ntile_c; 
+    int ntile_r; 
+    int max_active_block;
+    int max_active_row;
+    long nnz;
+
+    vector<int> rows;
+    vector<int> cols;
+    vector<float> vals; 
+    vector<int> row_holder;
+    vector<int> active_row;
+    vector<int> lastIdx_block_tile;
+    vector<int> n_actv_row;
+    vector<int> lastIdx_tile;
+    vector<int> tiled_ind;
+
+    TiledMatrix(Matrix S, int tile_sizeX, int tile_sizeY){
+        ntile_c = S.n_cols/tile_sizeX + 1;
+        ntile_r = S.n_rows/tile_sizeY + 1;
+        max_active_block = (S.n_rows/actv_row_size+1);
+        lastIdx_block_tile.resize((ntile_c+1) * (S.n_rows/actv_row_size+1));
+        lastIdx_tile.resize(ntile_c+1);
+        rows.resize(S.nnz + ntile_c * BLOCKSIZE - 1);
+        cols.resize(S.nnz + ntile_c * BLOCKSIZE - 1);
+        vals.resize(S.nnz + ntile_c * BLOCKSIZE - 1);
+        tiled_ind.resize(S.nnz + ntile_c * BLOCKSIZE - 1);
+        active_row.resize(S.n_rows * ntile_c);
+        row_holder.resize(S.n_rows);
+        n_actv_row.resize(ntile_c);
+    }
+};
+
+void make_HTasH(const vector <float> H, vector <float> &H_t, int n_cols, int k){
     for(long r = 0; r < n_cols; ++r){
         for(long t = 0; t < k; ++t)
             H_t[t*n_cols+r] = H[r*k+t]; //-1;
     }
 }
 
-void initial(float *X, long n, int k){
+void initial(vector <float> &X, long n, int k){
     srand48(0L);
     for(long r = 0; r < n; ++r){
         for(long t = 0; t < k; ++t)
@@ -89,7 +128,8 @@ void unsorted_make_CSR(int *rows, int *cols, float * vals, long nnz, long n_rows
 }
 // void make_tile(smat_t &R, mat_int &tiled_bin, const int TS)
 
-void make_CSR(vector<int> rows, vector<int> cols, vector<float> vals, long nnz, long n_rows, int *row_ptr, int* row_holder){
+void make_CSR(vector<int> rows, vector<int> cols, vector<float> vals, long nnz, 
+    long n_rows, int *row_ptr, int* row_holder){
     //assuming sorted
     
     //if CSR
@@ -224,90 +264,82 @@ void rewrite_col_sorted_matrix(int * row_ptr, int * row_ind, int *col_ind, float
 }
 
 
-int rewrite_matrix_1D(int * row_ptr, vector <int> row_ind, vector <int> col_ind, vector <float>  val_ind, 
-    int *new_rows, int *new_cols, float * new_vals, long nnz, long n_rows, long n_cols,
-    int TS, int *tiled_ind, int * lastIdx_tile, int *active_row, int *passive_row, int *count, 
-    int *lastIdx_block_tile, int &actv_row_size, long &new_nnz, int * row_holder, int max_sh_row){
+int rewrite_matrix_1D(const Matrix S, TiledMatrix &tS, int * row_ptr, int TS, int * row_holder){
+
+    
 
     long new_idx = 0, idx =0;
-    int max_block_inAtile = n_rows/actv_row_size+1;
-    int n_tile = n_cols/TS + 1, tile_no=0;
-    int *row_lim = new int[ n_rows];
-    lastIdx_tile[0] = 0; 
-    int max_active_row = 0;
+    int max_block_inAtile = S.n_rows/actv_row_size+1;
+    int n_tile = tS.ntile_c, tile_no=0;
+    tS.lastIdx_tile[0] = 0; 
     unsigned char c[4];
-    int row =0;
-    int col =0;
+    int row =0, col =0;
     unsigned int final_int =0, final_row, final_col;
+    long n_rows = S.n_rows;
+    long n_cols = S.n_cols;
+    vector<int> row_lim(n_rows);
     
     // #pragma omp parallel for 
     for(int tile_lim = TS; tile_lim <= (n_cols+TS-1); tile_lim+=TS){ 
         int block_count =0 ;
         int cur_block =0 ,r =0;
         tile_no = tile_lim/TS;  
-        count[tile_no-1] = 0;
+        tS.n_actv_row[tile_no-1] = 0;
+        
         if(tile_no == 1) 
-            lastIdx_block_tile[tile_no* max_block_inAtile + 0] = 0; 
+            tS.lastIdx_block_tile[tile_no* max_block_inAtile + 0] = 0; 
         else
-            lastIdx_block_tile[tile_no* max_block_inAtile + 0] = new_idx; 
+            tS.lastIdx_block_tile[tile_no* max_block_inAtile + 0] = new_idx; 
+        
         for(int holder = 0; holder <n_rows; ++holder){ 
             r = row_holder[holder];
         //for(int r = 0; r <n_rows; ++r){ 
             if(tile_lim == TS){ idx = row_ptr[holder]; row_lim[holder] = idx;}
             else idx = row_lim[holder];
                         
-            while(col_ind[idx] < tile_lim && idx < row_ptr[holder+1]){
-                tiled_ind[new_idx] = idx;
-                new_rows[new_idx] = count[tile_no-1];//row_ind[idx];
-                new_cols[new_idx] = col_ind[idx];
+            while(S.cols[idx] < tile_lim && idx < row_ptr[holder+1]){
+                tS.tiled_ind[new_idx] = idx;
+                tS.rows[new_idx] = tS.n_actv_row[tile_no-1];//S.rows[idx];
+                tS.cols[new_idx] = S.cols[idx];
 
 
                 // ******* bit mask start *******
-                // row = count[tile_no-1];;//row_ind[idx];
-                // col = col_ind[idx]%95;
+                // row = tS.n_actv_row[tile_no-1];;//S.rows[idx];
+                // col = S.cols[idx]%95;
                 // c[0] = (col>>0) & 0xff;
                 // c[1] = (row>>16) & 0xFF;
                 // c[2] = (row>>8) & 0xFF;
                 // c[3] = (row>>0) & 0xff;
                 // final_int = ((c[1]) << 24) | ((c[2]) << 16) | c[3] << 8 | c[0];
-                // new_rows[new_idx] = final_int;
+                // tS.rows[new_idx] = final_int;
                 // // ******* bit mask finish ******
 
-                new_vals[new_idx] = val_ind[idx];
+                tS.vals[new_idx] = S.vals[idx];
                 new_idx++;
                 idx++;
             }   
             if(idx != row_lim[holder]){                
-                active_row[(tile_no-1) * n_rows + count[tile_no-1]++]=r;
-                passive_row[(tile_no-1) * n_rows + holder] = count[tile_no-1]-1;  
-                // if(tile_no == 2 && r == 263)
-                //     cout <<"active passive " <<r <<" "<< active_row[(tile_no-1) * n_rows + (r)] << " " 
-                // << passive_row[(tile_no-1) * n_rows + r ] << endl;
+                tS.active_row[(tile_no-1) * n_rows + tS.n_actv_row[tile_no-1]++]=r;
+                // passive_row[(tile_no-1) * n_rows + holder] = tS.n_actv_row[tile_no-1]-1;  
                 cur_block++;
             }  
             row_lim[holder] = idx;   
-            if(cur_block >= max_sh_row) { 
+            if(cur_block >= actv_row_size) { 
                 cur_block = 0;
-                lastIdx_block_tile[(tile_no-1)* max_block_inAtile + block_count] = new_idx; 
+                tS.lastIdx_block_tile[(tile_no-1)* max_block_inAtile + block_count] = new_idx; 
                 block_count++;  
             } 
         
-            if(holder == n_rows-1 && cur_block > 0 && cur_block < max_sh_row)
-                lastIdx_block_tile[(tile_no-1)* max_block_inAtile + block_count] = new_idx; 
+            if(holder == n_rows-1 && cur_block > 0 && cur_block < actv_row_size)
+                tS.lastIdx_block_tile[(tile_no-1)* max_block_inAtile + block_count] = new_idx; 
         }
-        if(count[tile_no-1] > max_active_row)
-            max_active_row = count[tile_no-1];
-        lastIdx_tile[tile_no] = new_idx; 
-        // if(tile_no == 2)
-        // for (int i = 1660; i < 1664; ++i)
-        //     cout << "max: "<<tile_no<<" "<<max_active_row <<" "<<count[tile_no-1]<<" "
-        // <<lastIdx_tile[tile_no-1] << " "<<lastIdx_block_tile[(tile_no-1)* max_block_inAtile +i]
-        // <<" "<<block_count<<endl;
+        if(tS.n_actv_row[tile_no-1] > tS.max_active_row)
+            tS.max_active_row = tS.n_actv_row[tile_no-1];
+        tS.lastIdx_tile[tile_no] = new_idx; 
         
     }
-    new_nnz = nnz;
-    delete(row_lim);
-    return max_active_row;
+    tS.nnz = S.nnz;
+    return tS.max_active_row;
 }
 
 
